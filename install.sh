@@ -67,7 +67,9 @@ run_timestamp=$(date -u '+%Y%m%d-%H%M%S')
 temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/coding-agent-workflows.XXXXXX")
 trap 'rm -rf -- "$temporary_root"' EXIT HUP INT TERM
 migration_log="$temporary_root/migrations.tsv"
+legacy_paths="$temporary_root/legacy-paths.txt"
 : > "$migration_log"
+: > "$legacy_paths"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -197,6 +199,7 @@ record_or_migrate_legacy() {
 
   fingerprint=$(path_fingerprint "$path")
   echo "Legacy item: $path [sha256:$fingerprint] -> $replacement" >&2
+  printf '%s\n' "$path" >> "$legacy_paths"
   if [ "$migrate_legacy" -ne 1 ]; then
     return 0
   fi
@@ -274,7 +277,17 @@ write_manifest() {
 
   if [ -f "$manifest" ]; then
     awk '
-      /"migrations"[[:space:]]*:[[:space:]]*\[/ { inside = 1; next }
+      /"migrations"[[:space:]]*:[[:space:]]*\[/ {
+        line = $0
+        sub(/^.*"migrations"[[:space:]]*:[[:space:]]*\[/, "", line)
+        if (line ~ /\][,]?[[:space:]]*$/) {
+          sub(/\][,]?[[:space:]]*$/, "", line)
+          if (line !~ /^[[:space:]]*$/) print line
+          exit
+        }
+        inside = 1
+        next
+      }
       inside && /^[[:space:]]*\][,]?[[:space:]]*$/ { exit }
       inside { print }
     ' "$manifest" | sed '/^[[:space:]]*$/d' > "$previous_migrations"
@@ -353,6 +366,7 @@ install_skills() {
   destination_root="$agent_root/skills"
 
   : > "$migration_log"
+  : > "$legacy_paths"
   inspect_legacy "$agent_root" "$agent"
   mkdir -p "$destination_root"
 
@@ -363,6 +377,10 @@ install_skills() {
 
     if directories_equal "$source" "$destination"; then
       echo "Already current $agent skill: $destination"
+      continue
+    fi
+    if [ -e "$destination" ] && [ "$migrate_legacy" -ne 1 ] && grep -F -x -e "$destination" "$legacy_paths" >/dev/null 2>&1; then
+      echo "Skipped legacy $agent skill: $destination (use --migrate-legacy to back it up first; --force does not bypass migration)" >&2
       continue
     fi
     if [ -e "$destination" ] && [ "$force" -ne 1 ] && ! managed_directory_unchanged "$agent_root" "$skill_name"; then

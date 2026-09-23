@@ -46,7 +46,7 @@ https://github.com/owner/repository/pull/32
 
 ## インストール
 
-### PowerShell
+### Windows PowerShell 5.1 / PowerShell 7
 
 ```powershell
 git clone https://github.com/Mega-Gorilla/coding-agent-workflows.git
@@ -74,7 +74,7 @@ cd coding-agent-workflows
 ./install.sh --target claude
 ```
 
-既存の管理対象Skillがmanifest記録時から変更されていなければ通常更新されます。未管理またはユーザー変更済みのSkillは保護され、明示的な`-Force` / `--force`なしでは上書きされません。
+既存の管理対象Skillがmanifest記録時から変更されていなければ通常更新されます。未管理またはユーザー変更済みのSkillは保護され、明示的な`-Force` / `--force`なしでは上書きされません。ただし、旧Skillとして検出された同名pathはforceでも上書きされず、backup付きの`-MigrateLegacy` / `--migrate-legacy`が必要です。
 
 ## 旧workflowからの移行
 

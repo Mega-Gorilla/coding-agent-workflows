@@ -78,6 +78,8 @@ coding-agent-workflows/install-manifest.json
 
 次回の通常更新では、manifest記録時から変更されていない管理対象Skillだけを安全に更新します。ユーザー変更済みまたは未管理の同名Skillはskipします。内容を確認して上書きする場合だけ`-Force` / `--force`を使用してください。
 
+`-Force` / `--force`はlegacy移行の確認を省略しません。旧Skillとして検出された同名pathを置き換える場合は、必ず`-MigrateLegacy` / `--migrate-legacy`でbackupを作成してください。
+
 ## 旧commandsを残す場合
 
 `-LegacyClaudeCommands` / `--legacy-claude-commands`はdeprecatedですが、履歴検証用に残しています。このmodeは旧commandsのみをClaude Codeへ導入し、新しいClaude Code workflow Skillsとは併用しません。

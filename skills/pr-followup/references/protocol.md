@@ -50,7 +50,7 @@ A marker is coordination data, not authentication and not a substitute for branc
 For a marker to control workflow selection or a terminal decision:
 
 1. Prefer a login explicitly allowed by the user or repository instructions.
-2. Without an allowlist, require effective repository permission from the collaborator-permission endpoint. Accept only an actual `push`, `maintain`, or `admin` capability; do not trust `author_association` alone.
+2. Without an allowlist, require `.user.permissions.push == true` from the collaborator-permission endpoint; do not compare the top-level `.permission` string to `push`, and do not trust `author_association` alone.
 3. Do not trust bots unless explicitly allowed.
 4. If permission cannot be verified, retain the content as feedback but do not use it as a terminal or workflow-control marker.
 5. Require an unedited issue comment. Query the comment node with GraphQL and require `lastEditedAt` to be null. `includesCreatedEdit` is supporting information, not a replacement for `lastEditedAt`.
@@ -62,6 +62,8 @@ The permission endpoint is:
 ```text
 GET /repos/{owner}/{repo}/collaborators/{username}/permission
 ```
+
+The top-level `.permission` value normally uses names such as `admin`, `write`, or `read`; the nested boolean is the capability check. The endpoint can return `403` when the caller cannot inspect collaborators. In that case, a marker from another repository is feedback only unless the user or repository instructions explicitly allowlist its author.
 
 An issue-comment node can be checked without embedding its body:
 
@@ -86,6 +88,15 @@ query($id: ID!) {
 - A later review continues the workflow begun by that follow-up marker.
 - Set `origin_event_id` once when the workflow starts and preserve the same value in every later marker. Review-originated workflows use `none`; human-feedback-originated workflows retain the decimal event ID.
 - If multiple unfinished workflows are plausible and cannot be disambiguated, stop as `blocked`.
+
+### Workflow lifecycle
+
+- Order trusted markers by their GitHub event creation time. Editing a marker never creates a new lifecycle event and makes that marker ineligible for control decisions.
+- A workflow with no trusted review marker yet is unfinished. A workflow whose latest trusted review decision is `changes_requested` or `commented` is also unfinished, even after a follow-up marker reports applied changes.
+- A follow-up marker never completes a workflow by itself; reviewer verification is still required.
+- A workflow is complete for automatic selection when its latest trusted review decision is `approved` or `blocked`. A later commit does not reopen that completed workflow; a later review starts a new workflow with a new UUID.
+- `blocked` stops automatic continuation. An explicit user instruction that resolves the block may resume the same `workflow_id`; otherwise subsequent work starts a new workflow.
+- Unfinished workflows do not expire merely because they are old. If an abandoned workflow conflicts with another plausible unfinished workflow, require the user to select or supersede it rather than guessing.
 
 ## Finding identity
 

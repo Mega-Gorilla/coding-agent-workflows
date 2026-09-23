@@ -39,7 +39,13 @@ function Get-RelativeUnixPath {
         [Parameter(Mandatory)] [string]$Base,
         [Parameter(Mandatory)] [string]$Path
     )
-    return ([IO.Path]::GetRelativePath($Base, $Path) -replace '\\', '/')
+    $basePath = [IO.Path]::GetFullPath($Base).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $prefix = $basePath + [IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside the requested base: $fullPath"
+    }
+    return ($fullPath.Substring($prefix.Length) -replace '\\', '/')
 }
 
 function Get-DirectoryFileMap {
@@ -71,7 +77,10 @@ function Get-PathFingerprint {
         $relative = Get-RelativeUnixPath -Base $Path -Path $_.FullName
         $lines.Add("$relative`t$(Get-FileSha256 -Path $_.FullName)")
     }
-    $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+    [string[]]$sortedLines = @($lines)
+    [Array]::Sort($sortedLines, [StringComparer]::Ordinal)
+    $canonical = if ($sortedLines.Count -gt 0) { ($sortedLines -join "`n") + "`n" } else { '' }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
         return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
@@ -357,6 +366,7 @@ function Install-Skills {
 
     Assert-SafeAgentRoot -Root $AgentRoot
     $manifest = Read-InstallManifest -AgentRoot $AgentRoot
+    $legacyCandidates = @(Get-LegacyCandidates -AgentRoot $AgentRoot -Agent $Agent -Manifest $manifest)
     $migrations = @(Inspect-Or-MigrateLegacy -AgentRoot $AgentRoot -Agent $Agent -Manifest $manifest)
     $destinationRoot = Join-Path $AgentRoot 'skills'
     New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
@@ -365,6 +375,11 @@ function Install-Skills {
         $destination = Join-Path $destinationRoot $sourceDirectory.Name
         if (Test-DirectoryEqual -Left $sourceDirectory.FullName -Right $destination) {
             Write-Host "Already current $Agent skill: $destination"
+            continue
+        }
+        $isUnmigratedLegacy = -not $MigrateLegacy -and @($legacyCandidates | Where-Object { $_.Path -eq $destination }).Count -gt 0
+        if ((Test-Path -LiteralPath $destination) -and $isUnmigratedLegacy) {
+            Write-Warning "Skipped legacy $Agent skill: $destination (use -MigrateLegacy to back it up first; -Force does not bypass migration)"
             continue
         }
         if (Test-Path -LiteralPath $destination) {

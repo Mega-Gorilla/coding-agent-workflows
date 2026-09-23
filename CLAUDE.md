@@ -55,6 +55,7 @@ Planned watch and loop Skills are tracked in Issues #3 and #4. Do not implement 
 
 - Normal installation only reports legacy items and never removes them.
 - Explicit migration moves exact known targets to a timestamped backup before installing replacements.
+- Force may replace reviewed unmanaged or modified non-legacy Skills, but it must never bypass backup migration for a detected legacy path.
 - Recursive replacement must validate that the target is a child of the selected agent root and reject filesystem-root or parent-traversal roots.
 - Managed unchanged Skills may update normally. Unmanaged or user-modified Skills require explicit force.
 - Every new-Skills installation writes package version and installed file hashes to the agent-root manifest.
@@ -67,5 +68,5 @@ Test installers only against scratch roots. Never test destructive migration aga
 - Run the Skill Creator `quick_validate.py` against every Skill directory.
 - Verify the two protocol reference files have the same SHA-256.
 - Parse PowerShell and POSIX installers before running them.
-- Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, and force update in scratch roots.
+- Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.

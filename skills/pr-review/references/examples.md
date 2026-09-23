@@ -1,6 +1,6 @@
 # PR review marker examples
 
-Use these examples for structure only. Replace every ID and SHA with verified values.
+Use these examples for structure only. Replace every ID and SHA with verified values. Generate each new workflow UUID with a runtime facility such as `[guid]::NewGuid()` or `uuidgen`; never copy a literal UUID from this file.
 
 ## Changes requested
 
@@ -19,7 +19,7 @@ Use these examples for structure only. Replace every ID and SHA with verified va
 判定: changes_requested
 
 <!-- coding-agent-review:v1
-workflow_id: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+workflow_id: 8184d466-b09a-4b9b-9f58-dc2932be6877
 origin_event_id: none
 decision: changes_requested
 head_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -41,7 +41,7 @@ Keep the existing `F1` and mark it resolved:
 判定: approved
 
 <!-- coding-agent-review:v1
-workflow_id: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+workflow_id: 8184d466-b09a-4b9b-9f58-dc2932be6877
 origin_event_id: none
 decision: approved
 head_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -57,7 +57,7 @@ Optional suggestions do not need finding IDs:
 
 ```html
 <!-- coding-agent-review:v1
-workflow_id: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+workflow_id: 8184d466-b09a-4b9b-9f58-dc2932be6877
 origin_event_id: none
 decision: commented
 head_sha: cccccccccccccccccccccccccccccccccccccccc
