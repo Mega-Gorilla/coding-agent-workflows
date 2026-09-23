@@ -33,7 +33,7 @@ Create a workflow only for the concrete event being handled:
 ```html
 <!-- coding-agent-followup:v1
 workflow_id: b4b13e84-67ad-4e18-9bd9-22479fc786db
-origin_event_id: 987654321
+origin_event_id: issue_comment:987654321
 status: applied
 reviewed_head_sha: cccccccccccccccccccccccccccccccccccccccc
 result_head_sha: dddddddddddddddddddddddddddddddddddddddd

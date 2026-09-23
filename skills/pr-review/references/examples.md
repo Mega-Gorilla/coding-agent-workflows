@@ -51,9 +51,9 @@ finding_statuses: F1=resolved
 by.Spock
 ```
 
-## Comment only
+## Question pending
 
-Optional suggestions do not need finding IDs:
+Use `commented` only when an unanswered question could change the decision but no blocking finding is established yet. Optional suggestions alone use `approved`. A pending question does not need a finding ID:
 
 ```html
 <!-- coding-agent-review:v1
