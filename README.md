@@ -16,7 +16,7 @@ PR のレビュー、レビュー対応、マージ、作業状況の確認を�
 
 ## 必要なもの
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Claude Code](https://code.claude.com/docs/en/overview)
 - [GitHub CLI (`gh`)](https://cli.github.com/)
 - 対象リポジトリで利用できる `git`
 - GitHub CLI の認証（`gh auth login`）
@@ -47,7 +47,7 @@ cd claude-code-custom-commands
 
 既存の同名コマンドを上書きする場合は `./install.sh --force` を使います。
 
-手動で導入する場合は、`commands/*.md` を `~/.claude/commands/` へコピーしてください。ファイル名から `.md` を除いた文字列がスラッシュコマンド名になります。
+手動で導入する場合は、`commands/*.md` を `~/.claude/commands/` へコピーしてください。ファイル名から `.md` を除いた文字列がスラッシュコマンド名になります。配置場所については [Claude Code の `.claude` ディレクトリ資料](https://code.claude.com/docs/en/claude-directory) も参照してください。
 
 ## 注意事項
 
@@ -72,4 +72,3 @@ cd claude-code-custom-commands
 - 公開条件に合う `LICENSE` を追加する
 - 個人環境向けの署名と signage 通知を残すか決める
 - GitHub 上でリポジトリの説明とトピックを設定する
-
