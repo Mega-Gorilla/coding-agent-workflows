@@ -28,7 +28,7 @@ by.Scotty
 
 ## Human feedback without a review marker
 
-Create a workflow only for the concrete event being handled:
+Create a workflow only for the concrete event being handled. Here the checklist contains one applied feedback item, while `finding_statuses` is `none` because the source did not assign a stable Finding ID:
 
 ```html
 <!-- coding-agent-followup:v1
