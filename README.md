@@ -1,8 +1,10 @@
 # Coding Agent Workflows
 
-Claude CodeとCodexで利用できる、GitHub中心の開発ワークフロー集です。現在のPhase 1では、単発のPRレビューとレビュー対応を、共通のmarker protocolを使うSkillsとして提供します。
+Claude CodeとCodexで利用できる、GitHub中心の開発ワークフロー集です。PRレビューとレビュー対応を、単発・watch・loopの対称なSkillsと共通marker protocolで提供します。
 
-workflow実行用の独自スクリプトは使用せず、Skillの指示、`references/`、既存の`gh` / `git`で動作します。実際の別リポジトリ開発で評価した後、監視用補助スクリプトが必要かを判断します。
+workflow実行用の独自スクリプトは使用せず、Skillの指示、`references/`、既存の`gh` / `git`で動作します。watch/loopの時間・状態・重複排除もまずscriptlessで実運用し、再現する問題が確認された場合だけ責務を限定した補助スクリプトを検討します。
+
+Phase 1の別repository実PRでの検証と、補助スクリプトを導入しない判断の根拠は[実運用パイロット記録](docs/phase1-pilot.md)にまとめています。
 
 ## 対応環境
 
@@ -18,15 +20,21 @@ Claude Codeの`/review`は組み込みaliasと衝突するため使用しませ�
 | Skill | 用途 |
 | --- | --- |
 | `pr-review` | PRを一度レビューする。過去markerがあれば再レビューとして動作する |
+| `pr-review-watch` | 次のレビュー対象イベントを待ち、最大1回レビューして終了する |
+| `pr-review-loop` | 最新HEADの承認または停止条件までレビューと待機を反復する |
 | `pr-followup` | レビュー指摘を一度評価し、許可された修正・検証・対応報告を行う |
+| `pr-followup-watch` | 次のレビュー指摘を待ち、最大1回対応して終了する |
+| `pr-followup-loop` | 最新HEADの承認または停止条件まで対応と待機を反復する |
 | `pr-merge` | マージ前確認、マージ、Issue更新を行う |
 | `startup-status` | Issue、PR、CI、Git履歴から進捗を確認する |
 
-`pr-review-watch`、`pr-followup-watch`、`pr-review-loop`、`pr-followup-loop`は、Phase 1の実運用評価後に追加予定です。設計と進捗は[親Issue #1](https://github.com/Mega-Gorilla/coding-agent-workflows/issues/1)で管理しています。
+watchは未処理イベントがあれば即時処理し、なければ30秒間隔で待ち、1サイクルで終了します。loopは同じ監視規則を複数サイクルに適用します。どちらも開始から最大30分の絶対期限を維持し、新しいHEADでは対応報告を最大2分待ってからレビューします。
+
+watch/loopは明示呼び出し専用です。Claude Codeでは`disable-model-invocation: true`、Codexでは`agents/openai.yaml`の`policy.allow_implicit_invocation: false`を設定しています。
 
 ## PRの指定
 
-`pr-review`と`pr-followup`は同じ規則で次を受け付けます。
+6つのPR workflow Skillは同じ規則で次を受け付けます。
 
 ```text
 32
@@ -96,8 +104,18 @@ cd coding-agent-workflows
 
 - ユーザーの最新メッセージ自体が`/pr-review 32`または`$pr-review 32`形式の呼び出しであれば、そのPRへのレビューコメント投稿を許可します。コード変更やpushは許可しません。
 - ユーザーの最新メッセージ自体が`/pr-followup 32`または`$pr-followup 32`形式の呼び出しであれば、そのPRに限定した修正、検証、通常のcommit/push、対応報告を許可します。
+- watch/loopは対応するSkill名を明示して呼び出した場合だけ動作します。review側は投稿だけ、follow-up側は対象PRに限定した修正・検証・通常のcommit/push・対応報告を、最大30分の実行中に反復できます。
 - 通常文で自動選択された場合は、ユーザーが明示した操作だけを行います。曖昧な場合は下書きまたは評価までで停止します。
 - merge、force-push、branch削除、履歴改変は別の明示依頼が必要です。
+
+## Watch／loopの停止条件
+
+- 最新HEADへの信頼できる`approved`
+- `blocked`、PRのclose／merge、キャンセル、認証・権限・安全上の問題
+- 開始から30分の絶対期限
+- 同じfindingと同じ反論が、新しい証拠なしで2往復した場合
+
+自由形式LGTMはLLMが意味を評価します。ただし、投稿時HEADを安全に結び付けられないコメント、編集済みmarker、古いHEAD、信頼条件を満たさない投稿は終端に使いません。timeoutは承認ではなく「今回の監視時間内に承認を確認できなかった」という結果です。
 
 ## Marker protocol
 
@@ -116,7 +134,11 @@ cd coding-agent-workflows
 .
 ├── skills/
 │   ├── pr-review/
+│   ├── pr-review-watch/
+│   ├── pr-review-loop/
 │   ├── pr-followup/
+│   ├── pr-followup-watch/
+│   ├── pr-followup-loop/
 │   ├── pr-merge/
 │   └── startup-status/
 ├── legacy/claude-commands/  # 履歴参照用。通常配布対象外
