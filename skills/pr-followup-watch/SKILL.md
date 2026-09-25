@@ -27,7 +27,7 @@ If the sibling `pr-followup` Skill or either required reference is unavailable, 
 
 1. Resolve and pin the repository, PR number, URL, base, head repository, head branch, and complete current HEAD SHA. Initialize the scriptless monitoring record with role `followup`, mode `watch`, a UTC start time, and an absolute deadline no later than 30 minutes after the start.
 2. Take an initial GitHub snapshot. Process the oldest unhandled trusted review marker, formal review, issue comment, or inline review comment immediately. If the current HEAD already has a trusted `approved` decision with no newer blocking feedback, return `approved` without changing or posting anything. A trusted `blocked` decision also ends the watch.
-3. If nothing is ready, poll every 30 seconds under the common watch rules. Do not reset the deadline between polling slices.
+3. If nothing is ready, poll at the default 60-second interval under the common watch rules. Do not reset the deadline between polling slices.
 4. Run exactly one follow-up cycle using `pr-followup`. A `commented` event may require a concise answer but must not cause an automatic code change. If the remote HEAD changes unexpectedly, refresh the evidence and protect local work rather than overwriting it.
 5. After any authorized push is visible as the PR HEAD and the follow-up response is posted, stop. Report the fixed target, handled event IDs and workflow, reviewed/result HEADs, item statuses, validation, commit/push outcome, and start/deadline.
 

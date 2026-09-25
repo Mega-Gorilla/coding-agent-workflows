@@ -28,7 +28,7 @@ Claude Codeの`/review`は組み込みaliasと衝突するため使用しませ�
 | `pr-merge` | マージ前確認、マージ、Issue更新を行う |
 | `startup-status` | Issue、PR、CI、Git履歴から進捗を確認する |
 
-watchは未処理イベントがあれば即時処理し、なければ30秒間隔で待ち、1サイクルで終了します。loopは同じ監視規則を複数サイクルに適用します。どちらも開始から最大30分の絶対期限を維持し、新しいHEADでは対応報告を最大2分待ってからレビューします。
+watchは未処理イベントがあれば即時処理し、なければ既定60秒間隔で状態を確認し、1サイクルで終了します。開始直後の1回目の確認は待たずに行い、変化を検出したら追加で待たずに処理します。loopは同じ監視規則を複数サイクルに適用します。どちらも開始から最大30分の絶対期限を維持し、新しいHEADでは対応報告を最大2分待ってからレビューします。
 
 watch/loopは明示呼び出し専用です。Claude Codeでは`disable-model-invocation: true`、Codexでは`agents/openai.yaml`の`policy.allow_implicit_invocation: false`を設定しています。
 
