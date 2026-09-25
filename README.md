@@ -84,9 +84,29 @@ cd coding-agent-workflows
 
 既存の管理対象Skillがmanifest記録時から変更されていなければ通常更新されます。未管理またはユーザー変更済みのSkillは保護され、明示的な`-Force` / `--force`なしでは上書きされません。ただし、旧Skillとして検出された同名pathはforceでも上書きされず、backup付きの`-MigrateLegacy` / `--migrate-legacy`が必要です。
 
+### 変更せずに確認する
+
+通常実行は新Skillの導入・更新とmanifestの書き込みを行います。何も変更せずに、検出結果と予定される操作だけを表示するには次を使います。
+
+```powershell
+./install.ps1 -WhatIf
+./install.ps1 -MigrateLegacy -WhatIf
+```
+
+```bash
+./install.sh --dry-run
+./install.sh --migrate-legacy --dry-run
+```
+
+### 古いpackageによる上書き防止
+
+インストール済みmanifestの`packageVersion`より古いpackageでは、どのagent rootも変更せずに停止します。古いcheckoutや別worktreeから誤って実行しても、新しいSkillを巻き戻したり管理対象から外したりしません。意図して戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定してください。
+
+また、実行したpackageに含まれない管理対象Skill（ディレクトリが残っているもの）のmanifest記録は削除せずに保持します。
+
 ## 旧workflowからの移行
 
-通常実行では、旧Claude Code commands、Codex custom prompts、旧Skillsのpath・SHA-256・移行先を表示するだけで、削除しません。確認後、次の明示optionでtimestamp付きbackupへ移動してから新Skillを導入します。
+通常実行では、旧Claude Code commands、Codex custom prompts、旧Skillsのpath・SHA-256・移行先を表示するだけで、削除・移動しません（新Skillの導入・更新は行われます）。事前に何も変更せず確認する場合は`-WhatIf` / `--dry-run`を併用してください。確認後、次の明示optionでtimestamp付きbackupへ移動してから新Skillを導入します。
 
 ```powershell
 ./install.ps1 -MigrateLegacy

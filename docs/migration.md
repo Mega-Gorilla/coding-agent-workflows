@@ -32,21 +32,23 @@ Claude Codeの`/review`は組み込みの`code-review` aliasが優先される�
 
 ## 1. Dry-run確認
 
-通常のインストールを実行します。
+何も変更しないdry-runで、移行を含めた予定操作を確認します。
 
 ```powershell
-./install.ps1
+./install.ps1 -MigrateLegacy -WhatIf
 ```
 
 ```bash
-./install.sh
+./install.sh --migrate-legacy --dry-run
 ```
 
-検出した旧ファイルごとにpath、SHA-256、移行先を表示します。この段階では旧ファイルを削除・移動しません。同名の旧`pr-review`などが存在する場合、新Skillは保護のためskipされます。
+検出した旧ファイルごとにpath、SHA-256、移行先と予定backup先を表示し、導入・更新・skipされるSkillを`Would ...`として表示します。dry-runではbackup、Skill、manifestを含め、agent root内のファイルを一切作成・変更・移動しません。
+
+通常実行（`-WhatIf` / `--dry-run`なし、`-MigrateLegacy` / `--migrate-legacy`なし）でも旧ファイルは削除・移動しませんが、新Skillの導入・更新とmanifestの書き込みは行われます。同名の旧`pr-review`などが存在する場合、新Skillは保護のためskipされます。
 
 ## 2. Backup付き移行
 
-一覧を確認した後、明示optionを指定します。
+一覧を確認した後、dry-runを外して明示optionを指定します。
 
 ```powershell
 ./install.ps1 -MigrateLegacy
@@ -85,6 +87,14 @@ coding-agent-workflows/install-manifest.json
 次回の通常更新では、manifest記録時から変更されていない管理対象Skillだけを安全に更新します。ユーザー変更済みまたは未管理の同名Skillはskipします。内容を確認して上書きする場合だけ`-Force` / `--force`を使用してください。
 
 `-Force` / `--force`はlegacy移行の確認を省略しません。旧Skillとして検出された同名pathを置き換える場合は、必ず`-MigrateLegacy` / `--migrate-legacy`でbackupを作成してください。
+
+### Package versionの確認
+
+インストーラーは変更を始める前に、対象となる全agent rootのmanifestの`packageVersion`と、実行するpackageの`VERSION`を比較します。packageの方が古い場合、またはどちらかを比較できない場合は、どのagent rootも変更せずに停止します。
+
+- 古いcheckoutや別worktreeのインストーラーを誤って実行しても、新しいSkillは巻き戻らず、manifestも書き換わりません。
+- 意図して古いpackageへ戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定します。
+- 実行したpackageに含まれない管理対象Skillのmanifest記録は、そのディレクトリが残っている限り保持します。後で新しいpackageを導入すると、通常の管理対象Skillとして更新されます。
 
 ## 旧commandsを残す場合
 

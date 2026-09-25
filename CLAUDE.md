@@ -51,13 +51,16 @@ Current Skills:
 `install.ps1` and `install.sh` must stay behaviorally equivalent.
 
 ```powershell
-./install.ps1 [-Target all|claude|codex] [-MigrateLegacy] [-Force] [-LegacyClaudeCommands] [-ClaudeRoot PATH] [-CodexRoot PATH]
+./install.ps1 [-Target all|claude|codex] [-WhatIf] [-MigrateLegacy] [-Force] [-AllowDowngrade] [-LegacyClaudeCommands] [-ClaudeRoot PATH] [-CodexRoot PATH]
 ```
 
 ```bash
-./install.sh [--target all|claude|codex] [--migrate-legacy] [--force] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]
+./install.sh [--target all|claude|codex] [--dry-run] [--migrate-legacy] [--force] [--allow-downgrade] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]
 ```
 
+- `-WhatIf` / `--dry-run` must not create, modify, move, or delete anything under an agent root, including backups and the manifest. It reports the version check, legacy detection, and each would-be install, update, skip, and backup.
+- Before changing any targeted Skill root, compare the manifest `packageVersion` with `VERSION`. An older or uncomparable package stops the whole run unless `-AllowDowngrade` / `--allow-downgrade` is given.
+- Manifest writes must retain entries for managed Skills that the current package does not contain while their directories still exist.
 - Normal installation only reports legacy items and never removes them.
 - Explicit migration moves exact known targets to a timestamped backup before installing replacements.
 - Force may replace reviewed unmanaged or modified non-legacy Skills, but it must never bypass backup migration for a detected legacy path.
@@ -74,4 +77,5 @@ Test installers only against scratch roots. Never test destructive migration aga
 - Verify the two protocol reference files have the same SHA-256 and the four watch/loop references have the same SHA-256.
 - Parse PowerShell and POSIX installers before running them.
 - Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
+- Verify that `-WhatIf` / `--dry-run` leaves every scratch agent root byte-identical, including with migration requested, and that a newer -> older -> newer package sequence refuses the downgrade, keeps the manifest unchanged, and still updates the newer Skills afterward.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.
