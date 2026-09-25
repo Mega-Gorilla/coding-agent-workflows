@@ -1,10 +1,11 @@
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [ValidateSet('all', 'claude', 'codex')]
     [string]$Target = 'all',
     [switch]$LegacyClaudeCommands,
     [switch]$MigrateLegacy,
     [switch]$Force,
+    [switch]$AllowDowngrade,
     [string]$ClaudeRoot = $(if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
     [string]$CodexRoot = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' })
 )
@@ -28,10 +29,128 @@ if ($LegacyClaudeCommands -and $MigrateLegacy) {
 
 $packageVersion = (Get-Content -Raw -LiteralPath $versionFile).Trim()
 $runTimestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+# -WhatIf is the PowerShell equivalent of install.sh --dry-run. Every write below
+# is skipped explicitly; WhatIf propagation to cmdlets is only a second guard.
+$DryRun = [bool]$WhatIfPreference
+
+# Accepted package versions: 1 to 4 dot-separated components of 1 to 9 ASCII digits.
+# install.sh uses the same grammar.
+function ConvertTo-PackageVersion {
+    param([string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text) -or $Text -cnotmatch '^[0-9]{1,9}(\.[0-9]{1,9}){0,3}\z') {
+        return $null
+    }
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($part in $Text.Split('.')) {
+        $parts.Add($part)
+    }
+    while ($parts.Count -lt 3) {
+        $parts.Add('0')
+    }
+    return [version]($parts -join '.')
+}
+
+# A manifest is safe to read and preserve only when every non-blank line is one of the
+# line forms these installers write (both the POSIX and the PowerShell layouts), it
+# starts with { and ends with }, and packageVersion, files, and migrations each appear
+# exactly once. install.sh applies the same line grammar; this installer additionally
+# requires ConvertFrom-Json to succeed because it reads the manifest as JSON later.
+function Test-ManifestWellFormed {
+    param([Parameter(Mandatory)] [string]$ManifestPath)
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $text = [IO.File]::ReadAllText((Convert-Path -LiteralPath $ManifestPath))
+    } catch {
+        return $false
+    }
+
+    $allowed = @(
+        '^"schemaVersion"[ \t]*:[ \t]*[0-9]+,?$',
+        '^"installedAt"[ \t]*:[ \t]*"[^"]*",?$',
+        '^"[^"\\]+"[ \t]*:[ \t]*"[0-9A-Fa-f]+",?$',
+        '^[{][ \t]*"source"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"backup"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*"[ \t]*,[ \t]*"replacement"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*[}],?$',
+        '^"(source|backup|replacement)"[ \t]*:[ \t]*"([^"\\]|\\.)*",?$',
+        '^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$',
+        '^[{]$',
+        '^[}],?$',
+        '^\],?$',
+        # Earlier POSIX writers emitted a lone separator line between migration records.
+        '^,$'
+    )
+    $lines = 0
+    $versions = 0
+    $files = 0
+    $migrations = 0
+    $last = ''
+    foreach ($rawLine in ($text -split "`n")) {
+        $line = $rawLine.TrimEnd("`r").Trim(" ", "`t")
+        if ($line -eq '') {
+            continue
+        }
+        $lines++
+        if ($lines -eq 1 -and $line -ne '{') {
+            return $false
+        }
+        $last = $line
+        if ($line -cmatch '^"packageVersion"[ \t]*:[ \t]*"[^"]*",?$') {
+            $versions++
+        } elseif ($line -cmatch '^"files"[ \t]*:[ \t]*[{]([ \t]*[}])?,?$') {
+            $files++
+        } elseif ($line -cmatch '^"migrations"[ \t]*:[ \t]*\[([ \t]*\])?,?$') {
+            $migrations++
+        } elseif (-not @($allowed | Where-Object { $line -cmatch $_ }).Count) {
+            return $false
+        }
+    }
+    if ($lines -eq 0 -or $last -ne '}' -or $versions -ne 1 -or $files -ne 1 -or $migrations -ne 1) {
+        return $false
+    }
+
+    try {
+        $null = $text | ConvertFrom-Json
+    } catch {
+        return $false
+    }
+    return $true
+}
+
+# Read packageVersion from the manifest text with the same line-based rule as
+# install.sh, so a damaged manifest is judged identically by both installers.
+function Get-ManifestPackageVersionText {
+    param([Parameter(Mandatory)] [string]$ManifestPath)
+
+    try {
+        $text = [IO.File]::ReadAllText((Convert-Path -LiteralPath $ManifestPath))
+    } catch {
+        return ''
+    }
+    $match = [regex]::Match($text, '(?m)^[ \t]*"packageVersion"[ \t]*:[ \t]*"([^"]*)"')
+    if (-not $match.Success) {
+        return ''
+    }
+    return $match.Groups[1].Value
+}
 
 function Get-FileSha256 {
     param([Parameter(Mandatory)] [string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    # Hash with .NET instead of Get-FileHash: Windows PowerShell 5.1 implements
+    # Get-FileHash with ShouldProcess, so -WhatIf would skip the read and break dry runs.
+    $stream = [IO.File]::OpenRead((Convert-Path -LiteralPath $Path))
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
 }
 
 function Get-RelativeUnixPath {
@@ -148,6 +267,46 @@ function Read-InstallManifest {
     } catch {
         Write-Warning "Ignoring unreadable install manifest: $path"
         return $null
+    }
+}
+
+function Assert-PackageVersionNotOlder {
+    param([Parameter(Mandatory)] [string]$AgentRoot)
+
+    Assert-SafeAgentRoot -Root $AgentRoot
+    $manifestPath = Join-Path $AgentRoot 'coding-agent-workflows/install-manifest.json'
+    # No manifest means nothing from this package is managed there yet.
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        return
+    }
+
+    # A manifest that cannot be read and preserved safely would lose management records.
+    if (-not (Test-ManifestWellFormed -ManifestPath $manifestPath)) {
+        if ($AllowDowngrade) {
+            Write-Warning "$manifestPath is not a well-formed install manifest; continuing because -AllowDowngrade was given. Its management records may be lost."
+            return
+        }
+        throw "Existing $manifestPath is not a well-formed install manifest, so its management records cannot be preserved safely. Restore or remove it after review, or re-run with -AllowDowngrade."
+    }
+    $installedText = Get-ManifestPackageVersionText -ManifestPath $manifestPath
+
+    # An existing manifest whose version is missing, empty, malformed, or unreadable fails closed.
+    $installed = ConvertTo-PackageVersion -Text $installedText
+    if ($null -eq $installed) {
+        if ($AllowDowngrade) {
+            Write-Warning "Cannot read a valid packageVersion from ${manifestPath}; continuing because -AllowDowngrade was given."
+            return
+        }
+        throw "Cannot read a valid packageVersion from existing $manifestPath (found: '$installedText'). Review the manifest, or re-run with -AllowDowngrade."
+    }
+    $package = ConvertTo-PackageVersion -Text $packageVersion
+
+    if ($package -lt $installed) {
+        if ($AllowDowngrade) {
+            Write-Warning "Downgrading $AgentRoot from package $installedText to $packageVersion because -AllowDowngrade was given."
+            return
+        }
+        throw "Refusing to install package $packageVersion over newer installed package $installedText in $AgentRoot. Update this checkout, or re-run with -AllowDowngrade after review."
     }
 }
 
@@ -296,6 +455,10 @@ function Inspect-Or-MigrateLegacy {
         $backupPath = Join-Path $backupRoot ($candidate.Relative -replace '/', [IO.Path]::DirectorySeparatorChar)
         Assert-SafeChildPath -Root $AgentRoot -Path $candidate.Path
         Assert-SafeChildPath -Root $AgentRoot -Path $backupPath
+        if ($DryRun) {
+            Write-Host "Would back up legacy $Agent item: $($candidate.Path) -> $backupPath"
+            continue
+        }
         New-Item -ItemType Directory -Path (Split-Path -Parent $backupPath) -Force | Out-Null
         Move-Item -LiteralPath $candidate.Path -Destination $backupPath
         Write-Host "Backed up legacy $Agent item: $($candidate.Path) -> $backupPath"
@@ -308,6 +471,8 @@ function Inspect-Or-MigrateLegacy {
     }
     if ($candidates.Count -gt 0 -and -not $MigrateLegacy) {
         Write-Warning 'Legacy items were not changed. Re-run with -MigrateLegacy to back them up and remove the originals.'
+    } elseif ($candidates.Count -gt 0 -and $DryRun) {
+        Write-Warning 'Dry run: legacy items were not moved.'
     }
     return $records
 }
@@ -332,9 +497,17 @@ function Write-InstallManifest {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Migrations
     )
 
+    $manifestDirectory = Join-Path $AgentRoot 'coding-agent-workflows'
+    $manifestPath = Join-Path $manifestDirectory 'install-manifest.json'
+    if ($DryRun) {
+        Write-Host "Would write install manifest: $manifestPath (package $packageVersion)"
+        return
+    }
+
     $existing = Read-InstallManifest -AgentRoot $AgentRoot
     $existingFiles = Get-ManifestFileMap -Manifest $existing
     $files = [ordered]@{}
+    $sourceNames = @(Get-ChildItem -LiteralPath $skillSource -Directory | ForEach-Object { $_.Name })
     foreach ($sourceDirectory in Get-ChildItem -LiteralPath $skillSource -Directory | Sort-Object Name) {
         $destination = Join-Path (Join-Path $AgentRoot 'skills') $sourceDirectory.Name
         if (Test-DirectoryEqual -Left $sourceDirectory.FullName -Right $destination) {
@@ -350,6 +523,30 @@ function Write-InstallManifest {
                 }
             }
         }
+    }
+
+    # Keep entries for managed Skills that this package does not contain, so an
+    # older or narrower package never turns them into unmanaged Skills.
+    $retainedSkills = [Collections.Generic.List[string]]::new()
+    foreach ($key in $existingFiles.Keys) {
+        $parts = $key.Split('/')
+        if ($parts.Count -lt 3 -or $parts[0] -ne 'skills') {
+            continue
+        }
+        $skillName = $parts[1]
+        if ($sourceNames -contains $skillName) {
+            continue
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $AgentRoot 'skills') $skillName) -PathType Container)) {
+            continue
+        }
+        $files[$key] = $existingFiles[$key]
+        if (-not $retainedSkills.Contains($skillName)) {
+            $retainedSkills.Add($skillName)
+        }
+    }
+    foreach ($skillName in $retainedSkills) {
+        Write-Warning "Retained manifest entries for managed skill not in package ${packageVersion}: $(Join-Path (Join-Path $AgentRoot 'skills') $skillName)"
     }
 
     $migrationHistory = [Collections.Generic.List[object]]::new()
@@ -369,9 +566,7 @@ function Write-InstallManifest {
         files = $files
         migrations = @($migrationHistory)
     }
-    $manifestDirectory = Join-Path $AgentRoot 'coding-agent-workflows'
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
-    $manifestPath = Join-Path $manifestDirectory 'install-manifest.json'
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
     Write-Host "Wrote install manifest: $manifestPath"
 }
@@ -387,7 +582,9 @@ function Install-Skills {
     $legacyCandidates = @(Get-LegacyCandidates -AgentRoot $AgentRoot -Agent $Agent -Manifest $manifest)
     $migrations = @(Inspect-Or-MigrateLegacy -AgentRoot $AgentRoot -Agent $Agent -Manifest $manifest)
     $destinationRoot = Join-Path $AgentRoot 'skills'
-    New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+    }
 
     foreach ($sourceDirectory in Get-ChildItem -LiteralPath $skillSource -Directory | Sort-Object Name) {
         $destination = Join-Path $destinationRoot $sourceDirectory.Name
@@ -395,17 +592,29 @@ function Install-Skills {
             Write-Host "Already current $Agent skill: $destination"
             continue
         }
-        $isUnmigratedLegacy = -not $MigrateLegacy -and @($legacyCandidates | Where-Object { $_.Path -eq $destination }).Count -gt 0
-        if ((Test-Path -LiteralPath $destination) -and $isUnmigratedLegacy) {
+        $isLegacy = @($legacyCandidates | Where-Object { $_.Path -eq $destination }).Count -gt 0
+        $exists = Test-Path -LiteralPath $destination
+        if ($exists -and $isLegacy -and -not $MigrateLegacy) {
             Write-Warning "Skipped legacy $Agent skill: $destination (use -MigrateLegacy to back it up first; -Force does not bypass migration)"
             continue
         }
-        if (Test-Path -LiteralPath $destination) {
+        if ($exists -and -not $isLegacy) {
             $managedUnchanged = Test-ManagedDirectoryUnchanged -AgentRoot $AgentRoot -SkillName $sourceDirectory.Name -Manifest $manifest
             if (-not $Force -and -not $managedUnchanged) {
                 Write-Warning "Skipped unmanaged or modified $Agent skill: $destination (use -Force after review)"
                 continue
             }
+        }
+        if ($DryRun) {
+            Assert-SafeChildPath -Root $AgentRoot -Path $destination
+            if ($isLegacy) {
+                Write-Host "Would install $Agent skill after legacy backup: $destination"
+            } elseif ($exists) {
+                Write-Host "Would update $Agent skill: $destination"
+            } else {
+                Write-Host "Would install $Agent skill: $destination"
+            }
+            continue
         }
         Replace-SkillDirectory -Source $sourceDirectory.FullName -Destination $destination -AgentRoot $AgentRoot
         Write-Host "Installed $Agent skill: $destination"
@@ -429,16 +638,40 @@ function Install-LegacyCommands {
 
     Write-Warning '-LegacyClaudeCommands is deprecated. No new Claude Code workflow Skills will be installed in this mode.'
     $destinationRoot = Join-Path $AgentRoot 'commands'
-    New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+    }
     Get-ChildItem -LiteralPath $legacyCommandSource -Filter '*.md' -File | Sort-Object Name | ForEach-Object {
         $destination = Join-Path $destinationRoot $_.Name
         if ((Test-Path -LiteralPath $destination) -and -not $Force) {
             Write-Warning "Skipped existing legacy Claude Code command: $destination"
             return
         }
+        if ($DryRun) {
+            Write-Host "Would install legacy Claude Code command: $destination"
+            return
+        }
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Force:$Force
         Write-Host "Installed legacy Claude Code command: $destination"
     }
+}
+
+# Validate the package version before any root is inspected or changed, so an
+# invalid VERSION can never be written to a manifest.
+if ($null -eq (ConvertTo-PackageVersion -Text $packageVersion)) {
+    throw "Invalid package VERSION '$packageVersion' in $versionFile. Expected 1 to 4 dot-separated numeric components of up to 9 digits."
+}
+
+# Check every targeted Skill root before changing any of them.
+if ($Target -in @('all', 'claude') -and -not $LegacyClaudeCommands) {
+    Assert-PackageVersionNotOlder -AgentRoot $ClaudeRoot
+}
+if ($Target -in @('all', 'codex')) {
+    Assert-PackageVersionNotOlder -AgentRoot $CodexRoot
+}
+
+if ($DryRun) {
+    Write-Host 'Dry run: no files will be changed.'
 }
 
 if ($Target -in @('all', 'claude')) {
@@ -453,4 +686,8 @@ if ($Target -in @('all', 'codex')) {
     Install-Skills -AgentRoot $CodexRoot -Agent codex
 }
 
-Write-Host "Installation complete (package $packageVersion). Start a new agent session before using newly installed skills."
+if ($DryRun) {
+    Write-Host "Dry run complete (package $packageVersion). No files were changed."
+} else {
+    Write-Host "Installation complete (package $packageVersion). Start a new agent session before using newly installed skills."
+}

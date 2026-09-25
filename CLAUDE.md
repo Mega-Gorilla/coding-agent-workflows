@@ -51,13 +51,18 @@ Current Skills:
 `install.ps1` and `install.sh` must stay behaviorally equivalent.
 
 ```powershell
-./install.ps1 [-Target all|claude|codex] [-MigrateLegacy] [-Force] [-LegacyClaudeCommands] [-ClaudeRoot PATH] [-CodexRoot PATH]
+./install.ps1 [-Target all|claude|codex] [-WhatIf] [-MigrateLegacy] [-Force] [-AllowDowngrade] [-LegacyClaudeCommands] [-ClaudeRoot PATH] [-CodexRoot PATH]
 ```
 
 ```bash
-./install.sh [--target all|claude|codex] [--migrate-legacy] [--force] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]
+./install.sh [--target all|claude|codex] [--dry-run] [--migrate-legacy] [--force] [--allow-downgrade] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]
 ```
 
+- `-WhatIf` / `--dry-run` must not create, modify, move, or delete anything under an agent root, including backups and the manifest. It reports the version check, legacy detection, and each would-be install, update, skip, and backup.
+- Before changing any targeted Skill root, compare the manifest `packageVersion` with `VERSION`. An older package, or an existing manifest whose `packageVersion` is missing, empty, malformed, or unreadable, stops the whole run unless `-AllowDowngrade` / `--allow-downgrade` is given. A root without a manifest is a fresh install.
+- Before the version comparison, an existing manifest must pass the shared line grammar (the POSIX and PowerShell layouts these installers write: starts with `{`, ends with `}`, exactly one `packageVersion`, `files`, and `migrations` line, and otherwise only file-hash and migration-record lines). `install.ps1` additionally requires `ConvertFrom-Json` to succeed. A manifest that fails stops the run unless the override is given, so management records are never silently dropped. Every manifest written by either installer must pass both checks.
+- Both installers accept only versions of 1 to 4 dot-separated components of 1 to 9 ASCII digits, read the manifest `packageVersion` with the same line-based rule, and always stop on an invalid package `VERSION`.
+- Manifest writes must retain entries for managed Skills that the current package does not contain while their directories still exist.
 - Normal installation only reports legacy items and never removes them.
 - Explicit migration moves exact known targets to a timestamped backup before installing replacements.
 - Force may replace reviewed unmanaged or modified non-legacy Skills, but it must never bypass backup migration for a detected legacy path.
@@ -74,4 +79,5 @@ Test installers only against scratch roots. Never test destructive migration aga
 - Verify the two protocol reference files have the same SHA-256 and the four watch/loop references have the same SHA-256.
 - Parse PowerShell and POSIX installers before running them.
 - Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
+- Verify that `-WhatIf` / `--dry-run` leaves every scratch agent root byte-identical, including with migration requested, and that a newer -> older -> newer package sequence refuses the downgrade, keeps the manifest unchanged, and still updates the newer Skills afterward. Also cover an existing manifest with a missing, empty, or invalid-JSON `packageVersion`, a manifest whose `packageVersion` line is readable but whose JSON is truncated, has appended garbage, or has an inserted unknown line, cross-acceptance of manifests written by every installer (with and without migrations), a second and third `--migrate-legacy` run by every writer order followed by a normal run of every installer, an invalid package `VERSION` on a fresh root, and version grammar boundaries (4 vs 5 components, 9 vs 10 digits) with identical exit codes in both installers.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.

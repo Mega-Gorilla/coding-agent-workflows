@@ -5,6 +5,8 @@ target=all
 force=0
 legacy_claude_commands=0
 migrate_legacy=0
+dry_run=0
+allow_downgrade=0
 claude_root=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 codex_root=${CODEX_HOME:-"$HOME/.codex"}
 
@@ -27,6 +29,14 @@ while [ "$#" -gt 0 ]; do
       legacy_claude_commands=1
       shift
       ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --allow-downgrade)
+      allow_downgrade=1
+      shift
+      ;;
     --claude-root)
       [ "$#" -ge 2 ] || { echo "--claude-root requires a path" >&2; exit 2; }
       claude_root=$2
@@ -38,7 +48,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [--target all|claude|codex] [--migrate-legacy] [--force] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]" >&2
+      echo "Usage: $0 [--target all|claude|codex] [--dry-run] [--migrate-legacy] [--force] [--allow-downgrade] [--legacy-claude-commands] [--claude-root PATH] [--codex-root PATH]" >&2
       exit 2
       ;;
   esac
@@ -62,7 +72,8 @@ version_file="$script_dir/VERSION"
 [ -d "$skill_source" ] || { echo "Skill directory not found: $skill_source" >&2; exit 1; }
 [ -f "$version_file" ] || { echo "VERSION file not found: $version_file" >&2; exit 1; }
 
-package_version=$(tr -d '\r\n' < "$version_file")
+# Trim surrounding whitespace like install.ps1; an embedded newline stays and is rejected as invalid.
+package_version=$(sed 's/\r$//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$version_file")
 run_timestamp=$(date -u '+%Y%m%d-%H%M%S')
 temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/coding-agent-workflows.XXXXXX")
 trap 'rm -rf -- "$temporary_root"' EXIT HUP INT TERM
@@ -182,6 +193,104 @@ managed_directory_unchanged() {
   return 0
 }
 
+manifest_package_version() {
+  manifest=$1
+  [ -f "$manifest" ] || return 0
+  sed -n 's/^[[:space:]]*"packageVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1 | tr -d '\r'
+}
+
+# A manifest is safe to read and preserve only when every non-blank line is one of the
+# line forms these installers write (both the POSIX and the PowerShell layouts), it
+# starts with { and ends with }, and packageVersion, files, and migrations each appear
+# exactly once. install.ps1 applies the same line grammar.
+manifest_is_well_formed() {
+  # Windows PowerShell 5.1 writes a UTF-8 BOM; strip it like .NET ReadAllText does.
+  LC_ALL=C awk -v bom="$(printf '\357\273\277')" '
+    NR == 1 && index($0, bom) == 1 { $0 = substr($0, length(bom) + 1) }
+    { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
+    $0 == "" { next }
+    {
+      lines++
+      if (lines == 1 && $0 != "{") bad = 1
+      last = $0
+    }
+    /^"packageVersion"[ \t]*:[ \t]*"[^"]*",?$/ { versions++; next }
+    /^"files"[ \t]*:[ \t]*[{]([ \t]*[}])?,?$/ { files++; next }
+    /^"migrations"[ \t]*:[ \t]*\[([ \t]*\])?,?$/ { migrations++; next }
+    /^"schemaVersion"[ \t]*:[ \t]*[0-9]+,?$/ { next }
+    /^"installedAt"[ \t]*:[ \t]*"[^"]*",?$/ { next }
+    /^"[^"\\]+"[ \t]*:[ \t]*"[0-9A-Fa-f]+",?$/ { next }
+    /^[{][ \t]*"source"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"backup"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*"[ \t]*,[ \t]*"replacement"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*[}],?$/ { next }
+    /^"(source|backup|replacement)"[ \t]*:[ \t]*"([^"\\]|\\.)*",?$/ { next }
+    /^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$/ { next }
+    /^[{]$/ || /^[}],?$/ || /^\],?$/ { next }
+    # Earlier POSIX writers emitted a lone separator line between migration records.
+    /^,$/ { next }
+    { bad = 1 }
+    END { exit !(bad == 0 && lines > 0 && last == "}" && versions == 1 && files == 1 && migrations == 1) }
+  ' "$1"
+}
+
+# Accepted package versions: 1 to 4 dot-separated components of 1 to 9 ASCII digits.
+# install.ps1 uses the same grammar.
+version_is_valid() {
+  case "$1" in
+    ''|*[!0-9.]*) return 1 ;;
+  esac
+  printf '%s\n' "$1" | grep -Eq '^[0-9]{1,9}(\.[0-9]{1,9}){0,3}$'
+}
+
+# Prints lt, eq, or gt for numeric dotted versions; missing components count as 0.
+version_compare() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    n = split(a, x, "."); m = split(b, y, "."); k = (n > m ? n : m)
+    for (i = 1; i <= k; i++) {
+      xi = (i <= n ? x[i] + 0 : 0); yi = (i <= m ? y[i] + 0 : 0)
+      if (xi < yi) { print "lt"; exit }
+      if (xi > yi) { print "gt"; exit }
+    }
+    print "eq"
+  }'
+}
+
+check_package_version() {
+  agent_root=$1
+  validate_agent_root "$agent_root"
+  manifest="$agent_root/coding-agent-workflows/install-manifest.json"
+  # No manifest means nothing from this package is managed there yet.
+  [ -e "$manifest" ] || return 0
+
+  # A manifest that cannot be read and preserved safely would lose management records.
+  if ! { [ -f "$manifest" ] && [ -r "$manifest" ] && manifest_is_well_formed "$manifest"; } 2>/dev/null; then
+    if [ "$allow_downgrade" -eq 1 ]; then
+      echo "Warning: $manifest is not a well-formed install manifest; continuing because --allow-downgrade was given. Its management records may be lost." >&2
+      return 0
+    fi
+    echo "Existing $manifest is not a well-formed install manifest, so its management records cannot be preserved safely. Restore or remove it after review, or re-run with --allow-downgrade." >&2
+    exit 1
+  fi
+  installed_version=$(manifest_package_version "$manifest" 2>/dev/null || true)
+
+  # An existing manifest whose version is missing, empty, malformed, or unreadable fails closed.
+  if ! version_is_valid "$installed_version"; then
+    if [ "$allow_downgrade" -eq 1 ]; then
+      echo "Warning: cannot read a valid packageVersion from $manifest; continuing because --allow-downgrade was given." >&2
+      return 0
+    fi
+    echo "Cannot read a valid packageVersion from existing $manifest (found: '${installed_version}'). Review the manifest, or re-run with --allow-downgrade." >&2
+    exit 1
+  fi
+
+  if [ "$(version_compare "$package_version" "$installed_version")" = lt ]; then
+    if [ "$allow_downgrade" -eq 1 ]; then
+      echo "Warning: downgrading $agent_root from package $installed_version to $package_version because --allow-downgrade was given." >&2
+      return 0
+    fi
+    echo "Refusing to install package $package_version over newer installed package $installed_version in $agent_root. Update this checkout, or re-run with --allow-downgrade after review." >&2
+    exit 1
+  fi
+}
+
 manifest_has_skill() {
   agent_root=$1
   skill_name=$2
@@ -207,6 +316,10 @@ record_or_migrate_legacy() {
   backup="$agent_root/coding-agent-workflows/backups/$run_timestamp/$relative"
   assert_safe_child "$agent_root" "$path"
   assert_safe_child "$agent_root" "$backup"
+  if [ "$dry_run" -eq 1 ]; then
+    echo "Would back up legacy item: $path -> $backup"
+    return 0
+  fi
   mkdir -p "$(dirname -- "$backup")"
   mv -- "$path" "$backup"
   printf '%s\t%s\t%s\t%s\n' "$path" "$backup" "$fingerprint" "$replacement" >> "$migration_log"
@@ -275,6 +388,8 @@ inspect_legacy() {
 
   if [ "$found" -eq 1 ] && [ "$migrate_legacy" -ne 1 ]; then
     echo "Legacy items were not changed. Re-run with --migrate-legacy to back them up and remove the originals." >&2
+  elif [ "$found" -eq 1 ] && [ "$dry_run" -eq 1 ]; then
+    echo "Dry run: legacy items were not moved." >&2
   fi
 }
 
@@ -286,6 +401,10 @@ write_manifest() {
   agent_root=$1
   manifest_directory="$agent_root/coding-agent-workflows"
   manifest="$manifest_directory/install-manifest.json"
+  if [ "$dry_run" -eq 1 ]; then
+    echo "Would write install manifest: $manifest (package $package_version)"
+    return 0
+  fi
   manifest_tmp="$temporary_root/manifest.json"
   previous_migrations=$(mktemp "$temporary_root/previous-migrations.XXXXXX")
   mkdir -p "$manifest_directory"
@@ -344,16 +463,46 @@ write_manifest() {
         first=0
       done < "$map_file"
     done
+
+    # Keep entries for managed Skills that this package does not contain, so an
+    # older or narrower package never turns them into unmanaged Skills.
+    if [ -f "$manifest" ]; then
+      sed -n 's/^[[:space:]]*"skills\/\([^/"]*\)\/[^"]*"[[:space:]]*:.*/\1/p' "$manifest" | LC_ALL=C sort -u > "$temporary_root/manifest-skills.txt"
+      while IFS= read -r skill_name; do
+        [ -n "$skill_name" ] || continue
+        [ -d "$skill_source/$skill_name" ] && continue
+        [ -d "$agent_root/skills/$skill_name" ] || continue
+        grep -F "\"skills/$skill_name/" "$manifest" | while IFS= read -r line; do
+          relative=$(printf '%s\n' "$line" | sed -n 's/^[[:space:]]*"\([^"]*\)".*/\1/p')
+          hash=$(printf '%s\n' "$line" | sed -n 's/.*:[[:space:]]*"\([0-9A-Fa-f][0-9A-Fa-f]*\)".*/\1/p' | tr 'A-F' 'a-f')
+          [ -n "$relative" ] && [ -n "$hash" ] && printf '%s\t%s\n' "$relative" "$hash"
+        done > "$temporary_root/retained.tsv"
+        tab=$(printf '\t')
+        while IFS="$tab" read -r relative hash; do
+          [ -n "$relative" ] || continue
+          if [ "$first" -eq 0 ]; then
+            echo ','
+          fi
+          printf '    "%s": "%s"' "$(json_escape "$relative")" "$hash"
+          first=0
+        done < "$temporary_root/retained.tsv"
+        echo "Retained manifest entries for managed skill not in package $package_version: $agent_root/skills/$skill_name" >&2
+      done < "$temporary_root/manifest-skills.txt"
+    fi
     echo
     echo '  },'
     echo '  "migrations": ['
 
+    # Attach the separator to the last previous record line instead of writing a
+    # lone comma line, so the manifest stays within the shared line grammar.
     if [ -s "$previous_migrations" ]; then
-      cat "$previous_migrations"
-      first=0
-    else
-      first=1
+      if [ -s "$migration_log" ]; then
+        sed 's/\r$//; $ s/$/,/' "$previous_migrations"
+      else
+        sed 's/\r$//' "$previous_migrations"
+      fi
     fi
+    first=1
     tab=$(printf '\t')
     while IFS="$tab" read -r source backup hash replacement; do
       [ -n "$source" ] || continue
@@ -377,13 +526,13 @@ install_skills() {
   agent_root=$1
   agent=$2
   validate_agent_root "$agent_root"
-  mkdir -p "$agent_root"
+  [ "$dry_run" -eq 1 ] || mkdir -p "$agent_root"
   destination_root="$agent_root/skills"
 
   : > "$migration_log"
   : > "$legacy_paths"
   inspect_legacy "$agent_root" "$agent"
-  mkdir -p "$destination_root"
+  [ "$dry_run" -eq 1 ] || mkdir -p "$destination_root"
 
   for source in "$skill_source"/*; do
     [ -d "$source" ] || continue
@@ -394,16 +543,30 @@ install_skills() {
       echo "Already current $agent skill: $destination"
       continue
     fi
-    if [ -e "$destination" ] && [ "$migrate_legacy" -ne 1 ] && grep -F -x -e "$destination" "$legacy_paths" >/dev/null 2>&1; then
+    is_legacy=0
+    if grep -F -x -e "$destination" "$legacy_paths" >/dev/null 2>&1; then
+      is_legacy=1
+    fi
+    if [ -e "$destination" ] && [ "$is_legacy" -eq 1 ] && [ "$migrate_legacy" -ne 1 ]; then
       echo "Skipped legacy $agent skill: $destination (use --migrate-legacy to back it up first; --force does not bypass migration)" >&2
       continue
     fi
-    if [ -e "$destination" ] && [ "$force" -ne 1 ] && ! managed_directory_unchanged "$agent_root" "$skill_name"; then
+    if [ -e "$destination" ] && [ "$is_legacy" -eq 0 ] && [ "$force" -ne 1 ] && ! managed_directory_unchanged "$agent_root" "$skill_name"; then
       echo "Skipped unmanaged or modified $agent skill: $destination (use --force after review)" >&2
       continue
     fi
 
     assert_safe_child "$agent_root" "$destination"
+    if [ "$dry_run" -eq 1 ]; then
+      if [ "$is_legacy" -eq 1 ]; then
+        echo "Would install $agent skill after legacy backup: $destination"
+      elif [ -e "$destination" ]; then
+        echo "Would update $agent skill: $destination"
+      else
+        echo "Would install $agent skill: $destination"
+      fi
+      continue
+    fi
     if [ -e "$destination" ]; then
       rm -rf -- "$destination"
     fi
@@ -417,7 +580,7 @@ install_skills() {
 install_legacy_commands() {
   agent_root=$1
   validate_agent_root "$agent_root"
-  mkdir -p "$agent_root"
+  [ "$dry_run" -eq 1 ] || mkdir -p "$agent_root"
   [ -d "$legacy_command_source" ] || { echo "Legacy command directory not found: $legacy_command_source" >&2; exit 1; }
 
   for source in "$skill_source"/*; do
@@ -431,7 +594,7 @@ install_legacy_commands() {
 
   echo "--legacy-claude-commands is deprecated. No new Claude Code workflow Skills will be installed in this mode." >&2
   destination_root="$agent_root/commands"
-  mkdir -p "$destination_root"
+  [ "$dry_run" -eq 1 ] || mkdir -p "$destination_root"
   for command in "$legacy_command_source"/*.md; do
     [ -f "$command" ] || continue
     destination="$destination_root/$(basename -- "$command")"
@@ -439,10 +602,33 @@ install_legacy_commands() {
       echo "Skipped existing legacy Claude Code command: $destination" >&2
       continue
     fi
+    if [ "$dry_run" -eq 1 ]; then
+      echo "Would install legacy Claude Code command: $destination"
+      continue
+    fi
     cp "$command" "$destination"
     echo "Installed legacy Claude Code command: $destination"
   done
 }
+
+# Validate the package version before any root is inspected or changed, so an
+# invalid VERSION can never be written to a manifest.
+if ! version_is_valid "$package_version"; then
+  echo "Invalid package VERSION '$package_version' in $version_file. Expected 1 to 4 dot-separated numeric components of up to 9 digits." >&2
+  exit 1
+fi
+
+# Check every targeted Skill root before changing any of them.
+if { [ "$target" = all ] || [ "$target" = claude ]; } && [ "$legacy_claude_commands" -ne 1 ]; then
+  check_package_version "$claude_root"
+fi
+if [ "$target" = all ] || [ "$target" = codex ]; then
+  check_package_version "$codex_root"
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+  echo "Dry run: no files will be changed."
+fi
 
 if [ "$target" = all ] || [ "$target" = claude ]; then
   if [ "$legacy_claude_commands" -eq 1 ]; then
@@ -456,4 +642,8 @@ if [ "$target" = all ] || [ "$target" = codex ]; then
   install_skills "$codex_root" codex
 fi
 
-echo "Installation complete (package $package_version). Start a new agent session before using newly installed skills."
+if [ "$dry_run" -eq 1 ]; then
+  echo "Dry run complete (package $package_version). No files were changed."
+else
+  echo "Installation complete (package $package_version). Start a new agent session before using newly installed skills."
+fi
