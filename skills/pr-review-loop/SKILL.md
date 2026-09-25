@@ -25,7 +25,7 @@ If the sibling `pr-review` Skill or either required reference is unavailable, st
 
 ## Workflow
 
-1. Resolve and pin the target. Initialize one scriptless monitoring record with role `review`, mode `loop`, a UTC start time, and an absolute deadline no later than 30 minutes after the start. The deadline never moves.
+1. Resolve and pin the target. Initialize one scriptless monitoring record with role `review`, mode `loop`, `max_cycles = 30`, a UTC invocation start, and a first `cycle_deadline_at` 30 minutes after the start. Move the cycle deadline only on the trusted progress events defined in the shared reference.
 2. Take an initial snapshot. Review immediately when the current HEAD lacks a trusted decision, when a trusted follow-up requires re-review, or when the HEAD advanced after the latest trusted review. Apply the two-minute follow-up grace rule to a newly observed HEAD.
 3. Perform one `pr-review` cycle in an isolated detached reviewer worktree when checkout or tests are needed. Preserve workflow and finding identity. Before posting, evaluate the dispute history for every still-open finding.
 4. Handle the decision:
@@ -34,6 +34,7 @@ If the sibling `pr-review` Skill or either required reference is unavailable, st
    - `commented`: post or ask the necessary question, make no code change, and continue waiting;
    - `blocked`: post or report the evidence needed for user judgment and stop.
 5. Repeat the same one-shot review cycle only for a new, unhandled trigger. Do not review the same HEAD and event set twice. On the second completed unchanged dispute round for a finding, emit `blocked` rather than restating it again.
-6. Stop on approval of the current HEAD, `blocked`, timeout, close, merge, cancellation, authentication failure, an unsafe conflict, or an ambiguous workflow. Never merge automatically.
+6. Each posted review marker completes one cycle. After the 30th completed cycle without a terminal result, do not start another review; stop with `max_cycles` and report the open findings and the decision needed, without posting a new marker.
+7. Stop on approval of the current HEAD, `blocked`, cycle `timeout`, `max_cycles`, close, merge, cancellation, authentication failure, an unsafe conflict, or an ambiguous workflow. Never merge automatically.
 
-The final report must include the fixed target, final HEAD, `workflow_id`, completed cycle count, triggering event IDs, finding states and dispute streaks, validation, start/deadline, terminal result, and any action the user must take.
+The final report must include the fixed target, final HEAD, `workflow_id`, completed cycles against the limit, triggering event IDs, finding states and dispute streaks, validation, invocation start, final cycle deadline and last progress, terminal result, and any action the user must take.

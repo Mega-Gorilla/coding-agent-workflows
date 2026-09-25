@@ -25,7 +25,7 @@ If the sibling `pr-followup` Skill or either required reference is unavailable, 
 
 ## Workflow
 
-1. Resolve and pin the target. Initialize one scriptless monitoring record with role `followup`, mode `loop`, a UTC start time, and an absolute deadline no later than 30 minutes after the start. The deadline never moves.
+1. Resolve and pin the target. Initialize one scriptless monitoring record with role `followup`, mode `loop`, `max_cycles = 30`, a UTC invocation start, and a first `cycle_deadline_at` 30 minutes after the start. Move the cycle deadline only on the trusted progress events defined in the shared reference.
 2. Take an initial snapshot. If the current HEAD already has a trusted `approved` decision and no later blocking feedback, finish successfully without changing code. Otherwise process the oldest unhandled review event immediately; if none exists, poll at the default 60-second interval.
 3. Before making changes, evaluate the dispute history for every open finding. If the second completed unchanged dispute round has already been reached, report `blocked` instead of repeating the same response.
 4. Perform one `pr-followup` cycle. Preserve workflow and finding identity, protect unexpected remote changes, apply only valid portions, validate them, push normally, and post the response only after the pushed commit is visible as the PR HEAD. A `commented` event may receive an answer but must not trigger automatic code changes.
@@ -34,6 +34,8 @@ If the sibling `pr-followup` Skill or either required reference is unavailable, 
    - `changes_requested`: process one new follow-up cycle;
    - `commented`: answer if necessary without automatic code changes, then continue waiting;
    - `blocked`: stop and report the evidence or user decision needed.
-6. Do not handle the same event or marker twice. Reconstruct handled events and dispute streaks from typed REST IDs and the GitHub marker history after a context refresh. Stop on approval, `blocked`, timeout, close, merge, cancellation, authentication failure, unsafe conflict, or ambiguous workflow. Never merge automatically.
+6. Do not handle the same event or marker twice. Reconstruct handled events, dispute streaks, and this invocation's completed cycles from typed REST IDs and the GitHub marker history after a context refresh.
+7. Each posted follow-up marker completes one cycle. After the 30th completed cycle without a terminal result, do not start another cycle; stop with `max_cycles` and report the open findings and the decision needed, without posting a new marker.
+8. Stop on approval, `blocked`, cycle `timeout`, `max_cycles`, close, merge, cancellation, authentication failure, unsafe conflict, or ambiguous workflow. Never merge automatically.
 
-The final report must include the fixed target, final HEAD, `workflow_id`, completed cycle count, handled event IDs, finding results and dispute streaks, validation, commits/pushes, start/deadline, terminal result, and any action the user must take.
+The final report must include the fixed target, final HEAD, `workflow_id`, completed cycles against the limit, handled event IDs, finding results and dispute streaks, validation, commits/pushes, invocation start, final cycle deadline and last progress, terminal result, and any action the user must take.
