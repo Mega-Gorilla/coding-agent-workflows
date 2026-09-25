@@ -1,40 +1,91 @@
 # Coding Agent Workflows
 
-Claude CodeとCodexで利用できる、GitHub中心の開発ワークフロー集です。PRレビューとレビュー対応を、単発・watch・loopの対称なSkillsと共通marker protocolで提供します。
+**Claude CodeとCodexで、PRのcleanup・レビュー・修正・再レビュー・承認までを安全に進めるGitHubワークフロー集です。**
 
-workflow実行用の独自スクリプトは使用せず、Skillの指示、`references/`、既存の`gh` / `git`で動作します。watch/loopの時間・状態・重複排除もまずscriptlessで実運用し、再現する問題が確認された場合だけ責務を限定した補助スクリプトを検討します。
+[MIT License](LICENSE) · [ワークフロー設計](https://github.com/Mega-Gorilla/coding-agent-workflows/issues/1) · [移行ガイド](docs/migration.md)
 
-Phase 1の別repository実PRでの検証と、補助スクリプトを導入しない判断の根拠は[実運用パイロット記録](docs/phase1-pilot.md)にまとめています。
+単発のレビューだけでなく、次の更新を待つwatch、承認まで反復するloop、PRが新しく持ち込んだ技術負債を整理するcleanupを提供します。Claude CodeとCodexで同じSkill名とPR指定方法を利用できます。
 
-## 対応環境
+```text
+Claude Code: /pr-cleanup 32  → /pr-review-loop 32
+Codex:      $pr-cleanup 32   → $pr-review-loop 32
+```
 
-| 環境 | 形式 | 呼び出し例 |
-| --- | --- | --- |
-| Codex | `skills/<name>/SKILL.md` | `$pr-review 32` |
-| Claude Code | `skills/<name>/SKILL.md` | `/pr-review 32` |
+## 特長
 
-Claude Codeの`/review`は組み込みaliasと衝突するため使用しません。Claude CodeとCodexで同じSkill名を利用します。
+- **レビューから承認まで継続** — reviewとfollow-upを最新HEADへの承認まで反復できます。
+- **指摘を確実に追跡** — `workflow_id`と`F1`、`F2`のような固定IDで、セッションをまたいで状態を引き継ぎます。
+- **PR由来の技術負債を整理** — 不要ファイル、dead code、重複、過剰な抽象化、古い文書を最終レビュー前に確認できます。
+- **Claude Code／Codex共通** — 呼び出し記号だけを変えて同じSkillを使用できます。
+- **安全な停止条件** — 承認、権限不足、対立、timeout、最大サイクル到達を明確に区別します。
 
-## 収録ワークフロー
+## 推奨フロー
+
+```mermaid
+flowchart LR
+    A[実装 / review対応] --> B[pr-cleanup]
+    B --> C[pr-review / pr-review-loop]
+    C --> D{最新HEADを承認?}
+    D -- いいえ --> A
+    D -- はい --> E[pr-merge / merge判断]
+```
+
+### reviewとfollow-upの協調
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as ユーザー
+    participant R as pr-review-loop
+    participant G as GitHub PR
+    participant F as pr-followup-loop
+
+    U->>R: PR #32のレビューを開始
+    R->>G: HEAD H1をレビュー<br/>findings F1, F2を投稿
+    F->>G: review結果を取得
+    F->>F: 指摘を評価・修正・テスト
+    F->>G: 修正HEAD H2と対応結果を投稿
+    R->>G: H2を再レビュー
+
+    alt すべて解決
+        R->>G: approved(H2)
+        F-->>U: 成功終了
+    else 追加対応が必要
+        R->>G: 未解決findingを再提示
+        F->>F: 次の対応サイクル
+    else 同じ対立が2往復
+        R->>G: blocked
+        R-->>U: 必要な判断を報告
+    end
+```
+
+## 収録Skill
 
 | Skill | 用途 |
 | --- | --- |
-| `pr-review` | PRを一度レビューする。過去markerがあれば再レビューとして動作する |
-| `pr-review-watch` | 次のレビュー対象イベントを待ち、最大1回レビューして終了する |
-| `pr-review-loop` | 最新HEADの承認または停止条件までレビューと待機を反復する |
-| `pr-followup` | レビュー指摘を一度評価し、許可された修正・検証・対応報告を行う |
-| `pr-followup-watch` | 次のレビュー指摘を待ち、最大1回対応して終了する |
-| `pr-followup-loop` | 最新HEADの承認または停止条件まで対応と待機を反復する |
-| `pr-merge` | マージ前確認、マージ、Issue更新を行う |
-| `startup-status` | Issue、PR、CI、Git履歴から進捗を確認する |
+| `pr-cleanup` | PRが新しく導入した技術負債を確認し、安全な範囲でcleanup／refactorする |
+| `pr-review` | 現在のHEADを一度レビューする |
+| `pr-review-watch` | 次のレビュー対象を待ち、最大1回レビューする |
+| `pr-review-loop` | 最新HEADの承認または停止条件までレビューを反復する |
+| `pr-followup` | レビュー指摘を一度評価し、修正・検証・対応報告を行う |
+| `pr-followup-watch` | 次のレビュー指摘を待ち、最大1回対応する |
+| `pr-followup-loop` | 最新HEADの承認または停止条件まで対応を反復する |
+| `pr-merge` | マージ前確認、マージ、関連Issueの更新を行う |
+| `startup-status` | Issue、PR、CI、Git履歴からプロジェクト状況を要約する |
 
-watchは未処理イベントがあれば即時処理し、なければ既定60秒間隔で状態を確認し、1サイクルで終了します。開始直後の1回目の確認は待たずに行い、変化を検出したら追加で待たずに処理します。loopは同じ監視規則を複数サイクルに適用します。どちらも開始から最大30分の絶対期限を維持し、新しいHEADでは対応報告を最大2分待ってからレビューします。
+## 使い方
 
-watch/loopは明示呼び出し専用です。Claude Codeでは`disable-model-invocation: true`、Codexでは`agents/openai.yaml`の`policy.allow_implicit_invocation: false`を設定しています。
+| 操作 | Claude Code | Codex |
+| --- | --- | --- |
+| PR #32をcleanup | `/pr-cleanup 32` | `$pr-cleanup 32` |
+| PR #32を一度レビュー | `/pr-review 32` | `$pr-review 32` |
+| 次の変更を一度レビュー | `/pr-review-watch 32` | `$pr-review-watch 32` |
+| 承認までレビュー | `/pr-review-loop 32` | `$pr-review-loop 32` |
+| 指摘へ一度対応 | `/pr-followup 32` | `$pr-followup 32` |
+| 承認まで対応 | `/pr-followup-loop 32` | `$pr-followup-loop 32` |
+| PRをマージ | `/pr-merge 32` | `$pr-merge 32` |
 
-## PRの指定
-
-6つのPR workflow Skillは同じ規則で次を受け付けます。
+次のPR指定形式を共通で利用できます。
 
 ```text
 32
@@ -43,7 +94,36 @@ owner/repository#32
 https://github.com/owner/repository/pull/32
 ```
 
-引数を省略した場合は、現在のbranchに対応するPRを一意に解決します。解決できない場合は推測せず停止します。
+引数なしの場合は、現在のbranchに対応するPRを解決します。
+
+> Claude Codeの`/review`は組み込みaliasと衝突するため、共通名の`pr-review`を使用してください。
+
+## watch／loop
+
+- 開始直後に状態を確認し、変更がない間は既定60秒間隔でpollします。
+- new HEADの検出後は、対応報告を最大2分待ってからレビューします。
+- 進展を確認するたびに、次のサイクル期限として30分を確保します。
+- watchは最大1サイクル、loopは1回の呼び出しで最大30サイクルです。
+- 最新HEADへの承認、`blocked`、`timeout`、`max_cycles`、PRのclose／mergeで終了します。
+
+## `pr-cleanup`
+
+`pr-cleanup`は、PRが新しく導入した技術負債を最終レビュー前に整理します。
+
+- 不要ファイル、debug出力、使われていないfixture
+- 未使用関数、import、branch、古いcommentやTODO
+- 重複処理、不要なwrapper、深すぎるfolder階層
+- 複雑なcontrol flow、非効率なI/O、文書と実装の不一致
+
+変更は対象PRとbehavior-preservingな範囲に限定します。所有者が不明なfile、大規模なarchitecture変更、公開contractの変更は自動実行せず、ユーザー判断へ返します。cleanup後のHEADは独立した`pr-review`で確認します。
+
+## 安全性
+
+- review系はコードを変更せず、follow-up／cleanup系は対象PRだけを変更します。
+- 完全なHEAD SHA、投稿者の権限、コメントの編集状態を確認します。
+- merge、force-push、branch削除、履歴改変は個別の明示依頼が必要です。
+- 同じ指摘と反論が新しい根拠なしに2往復した場合は`blocked`で停止します。
+- markerはbranch protectionや人間による承認を置き換えません。
 
 ## 必要なもの
 
@@ -62,13 +142,6 @@ cd coding-agent-workflows
 ./install.ps1
 ```
 
-片方だけへインストールする場合:
-
-```powershell
-./install.ps1 -Target codex
-./install.ps1 -Target claude
-```
-
 ### macOS / Linux
 
 ```bash
@@ -77,36 +150,33 @@ cd coding-agent-workflows
 ./install.sh
 ```
 
+片方だけへインストールする場合:
+
+```powershell
+./install.ps1 -Target codex
+./install.ps1 -Target claude
+```
+
 ```bash
 ./install.sh --target codex
 ./install.sh --target claude
 ```
 
-既存の管理対象Skillがmanifest記録時から変更されていなければ通常更新されます。未管理またはユーザー変更済みのSkillは保護され、明示的な`-Force` / `--force`なしでは上書きされません。ただし、旧Skillとして検出された同名pathはforceでも上書きされず、backup付きの`-MigrateLegacy` / `--migrate-legacy`が必要です。
+導入後は新しいagent sessionを開始してください。
 
-### 変更せずに確認する
+## 更新・移行
 
-通常実行は新Skillの導入・更新とmanifestの書き込みを行います。何も変更せずに、検出結果と予定される操作だけを表示するには次を使います。
+変更せずに予定だけを確認できます。
 
 ```powershell
-./install.ps1 -WhatIf
 ./install.ps1 -MigrateLegacy -WhatIf
 ```
 
 ```bash
-./install.sh --dry-run
 ./install.sh --migrate-legacy --dry-run
 ```
 
-### 古いpackageによる上書き防止
-
-インストール済みmanifestの`packageVersion`より古いpackageでは、どのagent rootも変更せずに停止します。manifestが存在するのに`packageVersion`を読めない場合（欠落・空・形式不正・読取失敗）や、manifest自体が壊れていて管理記録を安全に保持できない場合も同様に停止します。packageの`VERSION`は1〜4個の数値要素（各1〜9桁、例: `0.3.1`）でなければならず、不正な場合は常に停止します。古いcheckoutや別worktreeから誤って実行しても、新しいSkillを巻き戻したり管理対象から外したりしません。意図して戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定してください。
-
-また、実行したpackageに含まれない管理対象Skill（ディレクトリが残っているもの）のmanifest記録は削除せずに保持します。
-
-## 旧workflowからの移行
-
-通常実行では、旧Claude Code commands、Codex custom prompts、旧Skillsのpath・SHA-256・移行先を表示するだけで、削除・移動しません（新Skillの導入・更新は行われます）。事前に何も変更せず確認する場合は`-WhatIf` / `--dry-run`を併用してください。確認後、次の明示optionでtimestamp付きbackupへ移動してから新Skillを導入します。
+確認後、旧commands／Skillsをbackup付きで移行します。
 
 ```powershell
 ./install.ps1 -MigrateLegacy
@@ -116,58 +186,7 @@ cd coding-agent-workflows
 ./install.sh --migrate-legacy
 ```
 
-各agent rootの`coding-agent-workflows/install-manifest.json`にpackage version、導入ファイルとhash、実施した移行を記録します。backupからの復元を含む詳細は[移行ガイド](docs/migration.md)を参照してください。
-
-`-LegacyClaudeCommands` / `--legacy-claude-commands`はdeprecatedです。履歴参照用の旧commandsだけを導入し、新しいClaude Code Skillsとは併用しません。
-
-## 権限境界
-
-- ユーザーの最新メッセージ自体が`/pr-review 32`または`$pr-review 32`形式の呼び出しであれば、そのPRへのレビューコメント投稿を許可します。コード変更やpushは許可しません。
-- ユーザーの最新メッセージ自体が`/pr-followup 32`または`$pr-followup 32`形式の呼び出しであれば、そのPRに限定した修正、検証、通常のcommit/push、対応報告を許可します。
-- watch/loopは対応するSkill名を明示して呼び出した場合だけ動作します。review側は投稿だけ、follow-up側は対象PRに限定した修正・検証・通常のcommit/push・対応報告を、最大30分の実行中に反復できます。
-- 通常文で自動選択された場合は、ユーザーが明示した操作だけを行います。曖昧な場合は下書きまたは評価までで停止します。
-- merge、force-push、branch削除、履歴改変は別の明示依頼が必要です。
-
-## Watch／loopの停止条件
-
-- 最新HEADへの信頼できる`approved`
-- `blocked`、PRのclose／merge、キャンセル、認証・権限・安全上の問題
-- 開始から30分の絶対期限
-- 同じfindingと同じ反論が、新しい証拠なしで2往復した場合
-
-自由形式LGTMはLLMが意味を評価します。ただし、投稿時HEADを安全に結び付けられないコメント、編集済みmarker、古いHEAD、信頼条件を満たさない投稿は終端に使いません。timeoutは承認ではなく「今回の監視時間内に承認を確認できなかった」という結果です。
-
-## Marker protocol
-
-`pr-review`と`pr-followup`は、通常の日本語コメントにHTML comment形式のv1 markerを含めます。
-
-- 同一GitHubアカウントでもmarker種別でreview側とfollow-up側を区別します。
-- 完全な40文字のHEAD SHA、共有`workflow_id`、固定finding IDを使用します。
-- markerは認証ではなく、branch protectionやrequired reviewを置き換えません。
-- 投稿者権限、編集状態、対象HEADを確認できないmarkerは終端判定に使いません。
-
-仕様と例は各Skillの`references/`に同梱されています。
-
-## リポジトリ構成
-
-```text
-.
-├── skills/
-│   ├── pr-review/
-│   ├── pr-review-watch/
-│   ├── pr-review-loop/
-│   ├── pr-followup/
-│   ├── pr-followup-watch/
-│   ├── pr-followup-loop/
-│   ├── pr-merge/
-│   └── startup-status/
-├── legacy/claude-commands/  # 履歴参照用。通常配布対象外
-├── docs/
-├── VERSION
-├── install.ps1
-├── install.sh
-└── LICENSE
-```
+復元方法は[移行ガイド](docs/migration.md)を参照してください。
 
 ## License
 
