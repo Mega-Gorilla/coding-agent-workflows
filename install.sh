@@ -199,6 +199,36 @@ manifest_package_version() {
   sed -n 's/^[[:space:]]*"packageVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1 | tr -d '\r'
 }
 
+# A manifest is safe to read and preserve only when every non-blank line is one of the
+# line forms these installers write (both the POSIX and the PowerShell layouts), it
+# starts with { and ends with }, and packageVersion, files, and migrations each appear
+# exactly once. install.ps1 applies the same line grammar.
+manifest_is_well_formed() {
+  # Windows PowerShell 5.1 writes a UTF-8 BOM; strip it like .NET ReadAllText does.
+  LC_ALL=C awk -v bom="$(printf '\357\273\277')" '
+    NR == 1 && index($0, bom) == 1 { $0 = substr($0, length(bom) + 1) }
+    { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
+    $0 == "" { next }
+    {
+      lines++
+      if (lines == 1 && $0 != "{") bad = 1
+      last = $0
+    }
+    /^"packageVersion"[ \t]*:[ \t]*"[^"]*",?$/ { versions++; next }
+    /^"files"[ \t]*:[ \t]*[{]([ \t]*[}])?,?$/ { files++; next }
+    /^"migrations"[ \t]*:[ \t]*\[([ \t]*\])?,?$/ { migrations++; next }
+    /^"schemaVersion"[ \t]*:[ \t]*[0-9]+,?$/ { next }
+    /^"installedAt"[ \t]*:[ \t]*"[^"]*",?$/ { next }
+    /^"[^"\\]+"[ \t]*:[ \t]*"[0-9A-Fa-f]+",?$/ { next }
+    /^[{][ \t]*"source"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"backup"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*"[ \t]*,[ \t]*"replacement"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*[}],?$/ { next }
+    /^"(source|backup|replacement)"[ \t]*:[ \t]*"([^"\\]|\\.)*",?$/ { next }
+    /^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$/ { next }
+    /^[{]$/ || /^[}],?$/ || /^\],?$/ { next }
+    { bad = 1 }
+    END { exit !(bad == 0 && lines > 0 && last == "}" && versions == 1 && files == 1 && migrations == 1) }
+  ' "$1"
+}
+
 # Accepted package versions: 1 to 4 dot-separated components of 1 to 9 ASCII digits.
 # install.ps1 uses the same grammar.
 version_is_valid() {
@@ -227,6 +257,16 @@ check_package_version() {
   manifest="$agent_root/coding-agent-workflows/install-manifest.json"
   # No manifest means nothing from this package is managed there yet.
   [ -e "$manifest" ] || return 0
+
+  # A manifest that cannot be read and preserved safely would lose management records.
+  if ! { [ -f "$manifest" ] && [ -r "$manifest" ] && manifest_is_well_formed "$manifest"; } 2>/dev/null; then
+    if [ "$allow_downgrade" -eq 1 ]; then
+      echo "Warning: $manifest is not a well-formed install manifest; continuing because --allow-downgrade was given. Its management records may be lost." >&2
+      return 0
+    fi
+    echo "Existing $manifest is not a well-formed install manifest, so its management records cannot be preserved safely. Restore or remove it after review, or re-run with --allow-downgrade." >&2
+    exit 1
+  fi
   installed_version=$(manifest_package_version "$manifest" 2>/dev/null || true)
 
   # An existing manifest whose version is missing, empty, malformed, or unreadable fails closed.

@@ -51,6 +51,71 @@ function ConvertTo-PackageVersion {
     return [version]($parts -join '.')
 }
 
+# A manifest is safe to read and preserve only when every non-blank line is one of the
+# line forms these installers write (both the POSIX and the PowerShell layouts), it
+# starts with { and ends with }, and packageVersion, files, and migrations each appear
+# exactly once. install.sh applies the same line grammar; this installer additionally
+# requires ConvertFrom-Json to succeed because it reads the manifest as JSON later.
+function Test-ManifestWellFormed {
+    param([Parameter(Mandatory)] [string]$ManifestPath)
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $text = [IO.File]::ReadAllText((Convert-Path -LiteralPath $ManifestPath))
+    } catch {
+        return $false
+    }
+
+    $allowed = @(
+        '^"schemaVersion"[ \t]*:[ \t]*[0-9]+,?$',
+        '^"installedAt"[ \t]*:[ \t]*"[^"]*",?$',
+        '^"[^"\\]+"[ \t]*:[ \t]*"[0-9A-Fa-f]+",?$',
+        '^[{][ \t]*"source"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"backup"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*,[ \t]*"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*"[ \t]*,[ \t]*"replacement"[ \t]*:[ \t]*"([^"\\]|\\.)*"[ \t]*[}],?$',
+        '^"(source|backup|replacement)"[ \t]*:[ \t]*"([^"\\]|\\.)*",?$',
+        '^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$',
+        '^[{]$',
+        '^[}],?$',
+        '^\],?$'
+    )
+    $lines = 0
+    $versions = 0
+    $files = 0
+    $migrations = 0
+    $last = ''
+    foreach ($rawLine in ($text -split "`n")) {
+        $line = $rawLine.TrimEnd("`r").Trim(" ", "`t")
+        if ($line -eq '') {
+            continue
+        }
+        $lines++
+        if ($lines -eq 1 -and $line -ne '{') {
+            return $false
+        }
+        $last = $line
+        if ($line -cmatch '^"packageVersion"[ \t]*:[ \t]*"[^"]*",?$') {
+            $versions++
+        } elseif ($line -cmatch '^"files"[ \t]*:[ \t]*[{]([ \t]*[}])?,?$') {
+            $files++
+        } elseif ($line -cmatch '^"migrations"[ \t]*:[ \t]*\[([ \t]*\])?,?$') {
+            $migrations++
+        } elseif (-not @($allowed | Where-Object { $line -cmatch $_ }).Count) {
+            return $false
+        }
+    }
+    if ($lines -eq 0 -or $last -ne '}' -or $versions -ne 1 -or $files -ne 1 -or $migrations -ne 1) {
+        return $false
+    }
+
+    try {
+        $null = $text | ConvertFrom-Json
+    } catch {
+        return $false
+    }
+    return $true
+}
+
 # Read packageVersion from the manifest text with the same line-based rule as
 # install.sh, so a damaged manifest is judged identically by both installers.
 function Get-ManifestPackageVersionText {
@@ -211,6 +276,15 @@ function Assert-PackageVersionNotOlder {
     # No manifest means nothing from this package is managed there yet.
     if (-not (Test-Path -LiteralPath $manifestPath)) {
         return
+    }
+
+    # A manifest that cannot be read and preserved safely would lose management records.
+    if (-not (Test-ManifestWellFormed -ManifestPath $manifestPath)) {
+        if ($AllowDowngrade) {
+            Write-Warning "$manifestPath is not a well-formed install manifest; continuing because -AllowDowngrade was given. Its management records may be lost."
+            return
+        }
+        throw "Existing $manifestPath is not a well-formed install manifest, so its management records cannot be preserved safely. Restore or remove it after review, or re-run with -AllowDowngrade."
     }
     $installedText = Get-ManifestPackageVersionText -ManifestPath $manifestPath
 
