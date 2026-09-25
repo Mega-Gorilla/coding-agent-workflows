@@ -224,6 +224,8 @@ manifest_is_well_formed() {
     /^"(source|backup|replacement)"[ \t]*:[ \t]*"([^"\\]|\\.)*",?$/ { next }
     /^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$/ { next }
     /^[{]$/ || /^[}],?$/ || /^\],?$/ { next }
+    # Earlier POSIX writers emitted a lone separator line between migration records.
+    /^,$/ { next }
     { bad = 1 }
     END { exit !(bad == 0 && lines > 0 && last == "}" && versions == 1 && files == 1 && migrations == 1) }
   ' "$1"
@@ -491,12 +493,16 @@ write_manifest() {
     echo '  },'
     echo '  "migrations": ['
 
+    # Attach the separator to the last previous record line instead of writing a
+    # lone comma line, so the manifest stays within the shared line grammar.
     if [ -s "$previous_migrations" ]; then
-      cat "$previous_migrations"
-      first=0
-    else
-      first=1
+      if [ -s "$migration_log" ]; then
+        sed 's/\r$//; $ s/$/,/' "$previous_migrations"
+      else
+        sed 's/\r$//' "$previous_migrations"
+      fi
     fi
+    first=1
     tab=$(printf '\t')
     while IFS="$tab" read -r source backup hash replacement; do
       [ -n "$source" ] || continue

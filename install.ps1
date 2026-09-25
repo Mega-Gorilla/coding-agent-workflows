@@ -77,7 +77,9 @@ function Test-ManifestWellFormed {
         '^"sha256"[ \t]*:[ \t]*"[0-9A-Fa-f]*",?$',
         '^[{]$',
         '^[}],?$',
-        '^\],?$'
+        '^\],?$',
+        # Earlier POSIX writers emitted a lone separator line between migration records.
+        '^,$'
     )
     $lines = 0
     $versions = 0
