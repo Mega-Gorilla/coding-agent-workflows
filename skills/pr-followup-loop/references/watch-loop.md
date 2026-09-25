@@ -6,20 +6,20 @@ No workflow runtime or helper script is used. The agent polls with existing `gh`
 
 ## Fixed parameters
 
-- Default polling interval: 30 seconds.
+- Default polling interval: 60 seconds. The first snapshot is taken immediately at invocation; the interval applies only between snapshots while nothing is ready.
 - Maximum monitoring window: 30 minutes from the invocation start. A user may request a shorter window, never a longer one.
-- One wait or polling call must remain below five minutes. Use the host-specific waiting method below; do not assume a foreground 30-second sleep is supported.
-- New-HEAD follow-up grace: at most two minutes, in 30-second polls, within the same overall deadline.
+- One wait or polling call must remain below five minutes. Use the host-specific waiting method below; do not assume a foreground sleep for the polling interval is supported.
+- New-HEAD follow-up grace: at most two minutes, polled at the default interval, within the same overall deadline.
 - `watch`: process at most one ready role-specific cycle.
 - `loop`: repeat ready role-specific cycles until a terminal result.
 - A polling slice ending does not create a new invocation and never extends the deadline.
 
 ## Host-specific waiting
 
-Keep GitHub snapshots approximately 30 seconds apart, but use the execution primitive supported by the current host:
+Keep GitHub snapshots approximately one polling interval (60 seconds by default) apart, but use the execution primitive supported by the current host:
 
-- Claude Code: do not issue a bare foreground `sleep 30` or `Start-Sleep 30`. Use Monitor or a background shell command with an inline bounded `until`/`while` loop, as directed by Claude Code. The loop may use short sleeps to service the monitor, but must throttle GitHub snapshot requests to approximately 30-second intervals and must exit on change, slice deadline, cancellation, or error.
-- Codex: use an existing command session's wait/poll facility when available. Otherwise use one bounded wait of at most 30 seconds, then return control and fetch a fresh snapshot.
+- Claude Code: do not issue a bare foreground `sleep` or `Start-Sleep` for the polling interval, such as `sleep 60`. Use Monitor or a background shell command with an inline bounded `until`/`while` loop, as directed by Claude Code. The loop may use short sleeps to service the monitor, but must throttle GitHub snapshot requests to approximately the polling interval and must exit on change, slice deadline, cancellation, or error.
+- Codex: use an existing command session's wait/poll facility when available. Otherwise use one bounded wait of at most the polling interval, then return control and fetch a fresh snapshot.
 - Other hosts: use their native non-blocking monitor or bounded wait. If no supported mechanism can preserve the deadline and cancellation behavior, stop as `blocked` instead of inventing an unbounded workaround.
 
 An inline loop passed directly to a host execution tool is not a generated polling-script file or a workflow runtime. Do not save it in the repository or agent directories. It may use only the already validated owner, repository, PR number, deadline, and prior numeric event IDs or complete HEAD SHA; never interpolate PR or comment text into shell source.
@@ -87,10 +87,12 @@ A trusted `approved` decision for the current HEAD is terminal only when no late
 If no event is ready:
 
 1. Check whether the current time reached `deadline_at`.
-2. Use the host-specific waiting method for 30 seconds or only the smaller remaining duration.
+2. Use the host-specific waiting method for the polling interval (60 seconds) or only the smaller remaining duration, so a wait never passes `deadline_at`.
 3. Fetch a new snapshot; do not reuse cached `gh pr view` output.
 4. Compare the prior and current HEAD and event IDs.
 5. Record new observations, select at most the oldest ready event set for the current role, and either process it or repeat.
+
+When a snapshot shows a ready event or a terminal state, such as a new HEAD, a trusted review or follow-up marker, an approval, `blocked`, close, or merge, act on it in that same step. Do not wait another polling interval first. The only deliberate delay is the review role's new-HEAD follow-up grace below.
 
 Keep the user informed at least once per polling slice when the interface supports progress updates. Stop promptly if the user cancels or replaces the request.
 
@@ -110,7 +112,7 @@ When the review role first observes a new HEAD:
 
 1. Record the new complete SHA and first-seen time.
 2. Check immediately for a trusted follow-up marker whose `result_head_sha` equals that SHA and whose workflow matches the unfinished review.
-3. If absent, poll for up to two minutes from the first-seen time, without exceeding `deadline_at`.
+3. If absent, poll at the default interval for up to two minutes from the first-seen time, without exceeding `deadline_at`.
 4. If the marker arrives, review the HEAD together with its applied, partial, rejected, or blocked rationale.
 5. If the grace expires, review the HEAD without it and state that no matching follow-up report arrived.
 6. If another HEAD appears during the grace, abandon the older candidate, record the newest SHA, and start a new grace period bounded by the original overall deadline.

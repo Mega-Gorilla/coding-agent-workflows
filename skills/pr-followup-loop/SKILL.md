@@ -26,7 +26,7 @@ If the sibling `pr-followup` Skill or either required reference is unavailable, 
 ## Workflow
 
 1. Resolve and pin the target. Initialize one scriptless monitoring record with role `followup`, mode `loop`, a UTC start time, and an absolute deadline no later than 30 minutes after the start. The deadline never moves.
-2. Take an initial snapshot. If the current HEAD already has a trusted `approved` decision and no later blocking feedback, finish successfully without changing code. Otherwise process the oldest unhandled review event immediately; if none exists, poll every 30 seconds.
+2. Take an initial snapshot. If the current HEAD already has a trusted `approved` decision and no later blocking feedback, finish successfully without changing code. Otherwise process the oldest unhandled review event immediately; if none exists, poll at the default 60-second interval.
 3. Before making changes, evaluate the dispute history for every open finding. If the second completed unchanged dispute round has already been reached, report `blocked` instead of repeating the same response.
 4. Perform one `pr-followup` cycle. Preserve workflow and finding identity, protect unexpected remote changes, apply only valid portions, validate them, push normally, and post the response only after the pushed commit is visible as the PR HEAD. A `commented` event may receive an answer but must not trigger automatic code changes.
 5. Return to polling for the next trusted review decision:

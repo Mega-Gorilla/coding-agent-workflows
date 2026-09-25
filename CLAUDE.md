@@ -72,6 +72,7 @@ Test installers only against scratch roots. Never test destructive migration aga
 
 - Run the Skill Creator `quick_validate.py` against every Skill directory with UTF-8 enabled. For the four explicit-only Skills, validate a temporary copy with the Claude-only `disable-model-invocation` field removed because the Codex validator rejects that cross-agent extension; separately assert that the real `SKILL.md` retains it and that `agents/openai.yaml` sets `allow_implicit_invocation: false`.
 - Verify the two protocol reference files have the same SHA-256 and the four watch/loop references have the same SHA-256.
+- Verify that the four watch/loop `SKILL.md` files, `watch-loop.md`, and README state the same default polling interval (60 seconds), take the first snapshot immediately, act on a detected event without an extra wait, and never wait past the absolute deadline.
 - Parse PowerShell and POSIX installers before running them.
 - Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.

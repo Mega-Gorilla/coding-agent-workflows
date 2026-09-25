@@ -30,7 +30,7 @@ If the sibling `pr-review` Skill or either required reference is unavailable, st
 3. Perform one `pr-review` cycle in an isolated detached reviewer worktree when checkout or tests are needed. Preserve workflow and finding identity. Before posting, evaluate the dispute history for every still-open finding.
 4. Handle the decision:
    - `approved`: post the marker for the verified current HEAD and finish successfully;
-   - `changes_requested`: post it, then return to 30-second polling for a relevant follow-up or new HEAD;
+   - `changes_requested`: post it, then return to polling at the default 60-second interval for a relevant follow-up or new HEAD;
    - `commented`: post or ask the necessary question, make no code change, and continue waiting;
    - `blocked`: post or report the evidence needed for user judgment and stop.
 5. Repeat the same one-shot review cycle only for a new, unhandled trigger. Do not review the same HEAD and event set twice. On the second completed unchanged dispute round for a finding, emit `blocked` rather than restating it again.
