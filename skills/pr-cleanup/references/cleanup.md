@@ -59,11 +59,12 @@ The overall status in `SKILL.md` follows from the items: any `blocked` gives `bl
 - Never rely on a bulk `git clean`.
 - Being untracked or ignored is not a reason to delete a file.
 - Before deleting, confirm the exact path, what created it, whether it can be regenerated, and that nothing references it.
-- Only a file created by the current workflow, or one that the build configuration demonstrably regenerates, may become an automatic deletion candidate.
+- A tracked file may become an automatic deletion candidate when the `base...HEAD` diff or the PR's commit history proves that the target PR added it, the file is not referenced, and its purpose is confirmed to be temporary or obsolete, such as a leftover debug, scratch, or backup file. Report the commit that added it. It does not need to be regenerable.
+- An untracked or ignored file may become an automatic deletion candidate only when the current workflow created it, or when the build configuration demonstrably regenerates it.
 - If ownership is unclear, or the path is outside the repository, a broad directory, a symlink, a submodule, or possibly credentials or local configuration, do not delete it; mark it `needs_decision`.
 - Never recursively delete a glob, an unresolved variable, the repository root, or an agent root.
 - Delete one validated exact path at a time. After deleting, re-run `git status` and a reference search.
-- Report every deleted exact path together with how to regenerate it.
+- Report every deleted exact path together with the evidence for deleting it: the commit that added it for a PR-added tracked file, or how to regenerate it for a generated file.
 
 ## Cleanup marker
 
@@ -98,7 +99,7 @@ Write the report in Japanese Markdown and include:
 - the target PR and the complete before- and after-cleanup HEAD SHAs;
 - the diff and working-tree scope that was inspected;
 - each item with its ID, category, outcome, and reason;
-- every deleted exact path and how to regenerate it;
+- every deleted exact path and its deletion evidence (the adding commit or the regeneration method);
 - items kept as intended structure, with evidence;
 - pre-existing debt left out of scope;
 - tests, lint, builds, and static analysis actually run, with results;
