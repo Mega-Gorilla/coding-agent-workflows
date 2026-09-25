@@ -100,7 +100,7 @@ cd coding-agent-workflows
 
 ### 古いpackageによる上書き防止
 
-インストール済みmanifestの`packageVersion`より古いpackageでは、どのagent rootも変更せずに停止します。古いcheckoutや別worktreeから誤って実行しても、新しいSkillを巻き戻したり管理対象から外したりしません。意図して戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定してください。
+インストール済みmanifestの`packageVersion`より古いpackageでは、どのagent rootも変更せずに停止します。manifestが存在するのに`packageVersion`を読めない場合（欠落・空・形式不正・読取失敗）も同様に停止します。packageの`VERSION`は1〜4個の数値要素（各1〜9桁、例: `0.3.1`）でなければならず、不正な場合は常に停止します。古いcheckoutや別worktreeから誤って実行しても、新しいSkillを巻き戻したり管理対象から外したりしません。意図して戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定してください。
 
 また、実行したpackageに含まれない管理対象Skill（ディレクトリが残っているもの）のmanifest記録は削除せずに保持します。
 

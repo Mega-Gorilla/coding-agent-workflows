@@ -72,7 +72,8 @@ version_file="$script_dir/VERSION"
 [ -d "$skill_source" ] || { echo "Skill directory not found: $skill_source" >&2; exit 1; }
 [ -f "$version_file" ] || { echo "VERSION file not found: $version_file" >&2; exit 1; }
 
-package_version=$(tr -d '\r\n' < "$version_file")
+# Trim surrounding whitespace like install.ps1; an embedded newline stays and is rejected as invalid.
+package_version=$(sed 's/\r$//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$version_file")
 run_timestamp=$(date -u '+%Y%m%d-%H%M%S')
 temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/coding-agent-workflows.XXXXXX")
 trap 'rm -rf -- "$temporary_root"' EXIT HUP INT TERM
@@ -198,11 +199,13 @@ manifest_package_version() {
   sed -n 's/^[[:space:]]*"packageVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1 | tr -d '\r'
 }
 
+# Accepted package versions: 1 to 4 dot-separated components of 1 to 9 ASCII digits.
+# install.ps1 uses the same grammar.
 version_is_valid() {
   case "$1" in
-    ''|.*|*.|*..*|*[!0-9.]*) return 1 ;;
+    ''|*[!0-9.]*) return 1 ;;
   esac
-  return 0
+  printf '%s\n' "$1" | grep -Eq '^[0-9]{1,9}(\.[0-9]{1,9}){0,3}$'
 }
 
 # Prints lt, eq, or gt for numeric dotted versions; missing components count as 0.
@@ -222,15 +225,17 @@ check_package_version() {
   agent_root=$1
   validate_agent_root "$agent_root"
   manifest="$agent_root/coding-agent-workflows/install-manifest.json"
-  installed_version=$(manifest_package_version "$manifest")
-  [ -n "$installed_version" ] || return 0
+  # No manifest means nothing from this package is managed there yet.
+  [ -e "$manifest" ] || return 0
+  installed_version=$(manifest_package_version "$manifest" 2>/dev/null || true)
 
-  if ! version_is_valid "$installed_version" || ! version_is_valid "$package_version"; then
+  # An existing manifest whose version is missing, empty, malformed, or unreadable fails closed.
+  if ! version_is_valid "$installed_version"; then
     if [ "$allow_downgrade" -eq 1 ]; then
-      echo "Warning: cannot compare package $package_version with installed $installed_version in $manifest; continuing because --allow-downgrade was given." >&2
+      echo "Warning: cannot read a valid packageVersion from $manifest; continuing because --allow-downgrade was given." >&2
       return 0
     fi
-    echo "Cannot compare package $package_version with installed $installed_version in $manifest. Review the checkout, or re-run with --allow-downgrade." >&2
+    echo "Cannot read a valid packageVersion from existing $manifest (found: '${installed_version}'). Review the manifest, or re-run with --allow-downgrade." >&2
     exit 1
   fi
 
@@ -559,6 +564,13 @@ install_legacy_commands() {
     echo "Installed legacy Claude Code command: $destination"
   done
 }
+
+# Validate the package version before any root is inspected or changed, so an
+# invalid VERSION can never be written to a manifest.
+if ! version_is_valid "$package_version"; then
+  echo "Invalid package VERSION '$package_version' in $version_file. Expected 1 to 4 dot-separated numeric components of up to 9 digits." >&2
+  exit 1
+fi
 
 # Check every targeted Skill root before changing any of them.
 if { [ "$target" = all ] || [ "$target" = claude ]; } && [ "$legacy_claude_commands" -ne 1 ]; then

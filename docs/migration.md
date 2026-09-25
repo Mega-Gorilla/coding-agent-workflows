@@ -90,7 +90,9 @@ coding-agent-workflows/install-manifest.json
 
 ### Package versionの確認
 
-インストーラーは変更を始める前に、対象となる全agent rootのmanifestの`packageVersion`と、実行するpackageの`VERSION`を比較します。packageの方が古い場合、またはどちらかを比較できない場合は、どのagent rootも変更せずに停止します。
+インストーラーは変更を始める前に、対象となる全agent rootのmanifestの`packageVersion`と、実行するpackageの`VERSION`を比較します。packageの方が古い場合、またはmanifestが存在するのに`packageVersion`を読めない場合（欠落・空・形式不正・読取失敗）は、どのagent rootも変更せずに停止します。manifestが存在しないagent rootは新規導入として扱います。
+
+`VERSION`とmanifestの`packageVersion`は、1〜4個のドット区切り数値要素（各1〜9桁のASCII数字）だけを受け付けます。PowerShell版とPOSIX版は同じ規則で判定し、packageの`VERSION`が不正な場合は`-AllowDowngrade` / `--allow-downgrade`があっても常に停止します。
 
 - 古いcheckoutや別worktreeのインストーラーを誤って実行しても、新しいSkillは巻き戻らず、manifestも書き換わりません。
 - 意図して古いpackageへ戻す場合だけ、内容を確認してから`-AllowDowngrade` / `--allow-downgrade`を指定します。

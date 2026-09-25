@@ -33,10 +33,12 @@ $runTimestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
 # is skipped explicitly; WhatIf propagation to cmdlets is only a second guard.
 $DryRun = [bool]$WhatIfPreference
 
+# Accepted package versions: 1 to 4 dot-separated components of 1 to 9 ASCII digits.
+# install.sh uses the same grammar.
 function ConvertTo-PackageVersion {
     param([string]$Text)
 
-    if ([string]::IsNullOrWhiteSpace($Text) -or $Text -notmatch '^\d+(\.\d+){0,3}$') {
+    if ([string]::IsNullOrEmpty($Text) -or $Text -cnotmatch '^[0-9]{1,9}(\.[0-9]{1,9}){0,3}\z') {
         return $null
     }
     $parts = [Collections.Generic.List[string]]::new()
@@ -49,17 +51,21 @@ function ConvertTo-PackageVersion {
     return [version]($parts -join '.')
 }
 
-function Get-ManifestPackageVersion {
-    param($Manifest)
+# Read packageVersion from the manifest text with the same line-based rule as
+# install.sh, so a damaged manifest is judged identically by both installers.
+function Get-ManifestPackageVersionText {
+    param([Parameter(Mandatory)] [string]$ManifestPath)
 
-    if ($null -eq $Manifest) {
+    try {
+        $text = [IO.File]::ReadAllText((Convert-Path -LiteralPath $ManifestPath))
+    } catch {
         return ''
     }
-    $property = $Manifest.PSObject.Properties['packageVersion']
-    if ($null -eq $property -or $null -eq $property.Value) {
+    $match = [regex]::Match($text, '(?m)^[ \t]*"packageVersion"[ \t]*:[ \t]*"([^"]*)"')
+    if (-not $match.Success) {
         return ''
     }
-    return ([string]$property.Value).Trim()
+    return $match.Groups[1].Value
 }
 
 function Get-FileSha256 {
@@ -202,20 +208,22 @@ function Assert-PackageVersionNotOlder {
 
     Assert-SafeAgentRoot -Root $AgentRoot
     $manifestPath = Join-Path $AgentRoot 'coding-agent-workflows/install-manifest.json'
-    $installedText = Get-ManifestPackageVersion -Manifest (Read-InstallManifest -AgentRoot $AgentRoot)
-    if (-not $installedText) {
+    # No manifest means nothing from this package is managed there yet.
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
         return
     }
+    $installedText = Get-ManifestPackageVersionText -ManifestPath $manifestPath
 
+    # An existing manifest whose version is missing, empty, malformed, or unreadable fails closed.
     $installed = ConvertTo-PackageVersion -Text $installedText
-    $package = ConvertTo-PackageVersion -Text $packageVersion
-    if ($null -eq $installed -or $null -eq $package) {
+    if ($null -eq $installed) {
         if ($AllowDowngrade) {
-            Write-Warning "Cannot compare package $packageVersion with installed $installedText in ${manifestPath}; continuing because -AllowDowngrade was given."
+            Write-Warning "Cannot read a valid packageVersion from ${manifestPath}; continuing because -AllowDowngrade was given."
             return
         }
-        throw "Cannot compare package $packageVersion with installed $installedText in $manifestPath. Review the checkout, or re-run with -AllowDowngrade."
+        throw "Cannot read a valid packageVersion from existing $manifestPath (found: '$installedText'). Review the manifest, or re-run with -AllowDowngrade."
     }
+    $package = ConvertTo-PackageVersion -Text $packageVersion
 
     if ($package -lt $installed) {
         if ($AllowDowngrade) {
@@ -570,6 +578,12 @@ function Install-LegacyCommands {
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Force:$Force
         Write-Host "Installed legacy Claude Code command: $destination"
     }
+}
+
+# Validate the package version before any root is inspected or changed, so an
+# invalid VERSION can never be written to a manifest.
+if ($null -eq (ConvertTo-PackageVersion -Text $packageVersion)) {
+    throw "Invalid package VERSION '$packageVersion' in $versionFile. Expected 1 to 4 dot-separated numeric components of up to 9 digits."
 }
 
 # Check every targeted Skill root before changing any of them.
