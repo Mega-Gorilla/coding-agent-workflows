@@ -117,6 +117,8 @@ https://github.com/owner/repository/pull/32
 
 変更は対象PRとbehavior-preservingな範囲に限定します。所有者が不明なfile、大規模なarchitecture変更、公開contractの変更は自動実行せず、ユーザー判断へ返します。cleanup後のHEADは独立した`pr-review`で確認します。
 
+結果は`cleaned`、`partially_cleaned`、`needs_decision`、`blocked`として、別種の`coding-agent-cleanup:v1` markerに記録します。このmarkerはreview／follow-upのworkflowを進めず、承認にもなりません。cleanup不要（`clean`）の場合は、commitもコメント投稿も行いません。
+
 ## 安全性
 
 - review系はコードを変更せず、follow-up／cleanup系は対象PRだけを変更します。

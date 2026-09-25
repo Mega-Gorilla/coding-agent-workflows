@@ -17,6 +17,8 @@ Codexの旧custom promptsは`/prompts:pr_review`のように呼び出されま�
 
 `pr-review-watch`、`pr-followup-watch`、`pr-review-loop`、`pr-followup-loop`には旧形式がなく、package 0.3.0以降の通常更新で追加されます。4つは明示呼び出し専用で、対応する単発Skillも同時に必要です。
 
+`pr-cleanup`にも旧形式はなく、package 0.4.0以降の通常更新で他のSkillと同様に追加されます。移行対象の旧ファイルはありません。
+
 Claude Codeの`/review`は組み込みの`code-review` aliasが優先されるため、新しいSkill名には採用しません。
 
 ## 移行対象

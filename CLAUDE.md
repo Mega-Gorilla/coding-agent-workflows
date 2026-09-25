@@ -27,6 +27,7 @@ Current Skills:
 - `pr-followup`: one review-response cycle.
 - `pr-followup-watch`: wait for and process at most one follow-up cycle.
 - `pr-followup-loop`: repeat follow-up cycles until approval or a bounded stop.
+- `pr-cleanup`: one cleanup of technical debt newly introduced by a PR, before its final review.
 - `pr-merge`: merge workflow retained from the original package.
 - `startup-status`: read-only project status workflow.
 
@@ -36,7 +37,8 @@ Current Skills:
 - Descriptions must be short and discriminating because they control automatic selection.
 - Keep essential workflow and authorization boundaries in `SKILL.md`; put marker schemas and substantial examples in `references/`.
 - The four watch/loop Skills depend on their corresponding one-shot Skill installed by this package. They must reuse it for review or implementation decisions rather than duplicate business logic.
-- The duplicated `pr-review` and `pr-followup` protocol references must remain byte-identical. The four `watch-loop.md` references must also remain byte-identical.
+- The duplicated `pr-review`, `pr-followup`, and `pr-cleanup` protocol references must remain byte-identical. The four `watch-loop.md` references must also remain byte-identical.
+- `pr-cleanup` changes only debt that its target PR newly introduced, stays behavior-preserving, never deletes files outside its deletion safety rules, and reports with the separate `coding-agent-cleanup:v1` marker, which carries no `workflow_id` and never controls or approves a review workflow. It is implementer-side output and ends with `by.Scotty`. Do not wire it into follow-up cycles, watch/loop, or merge checks before the pilot described in Issue #8.
 - Watch/loop Skills are explicit-only in both agents: Claude Code frontmatter uses `disable-model-invocation: true`, and Codex metadata uses `policy.allow_implicit_invocation: false`.
 - Watch/loop keep their scriptless monitoring record in task context and reconstruct durable state from GitHub events and markers. Do not add committed state files or generated polling-script files. A host-native Monitor or background command containing an inline bounded loop is allowed when passed directly to the execution tool and not saved as a script.
 - GitHub-facing review and follow-up output is Japanese Markdown.
@@ -76,10 +78,11 @@ Test installers only against scratch roots. Never test destructive migration aga
 ## Validation
 
 - Run the Skill Creator `quick_validate.py` against every Skill directory with UTF-8 enabled. For the four explicit-only Skills, validate a temporary copy with the Claude-only `disable-model-invocation` field removed because the Codex validator rejects that cross-agent extension; separately assert that the real `SKILL.md` retains it and that `agents/openai.yaml` sets `allow_implicit_invocation: false`.
-- Verify the two protocol reference files have the same SHA-256 and the four watch/loop references have the same SHA-256.
+- Verify the four watch/loop references have the same SHA-256; the protocol reference check is listed below.
 - Verify that the four watch/loop `SKILL.md` files, `watch-loop.md`, and README state the same default polling interval (60 seconds), take the first snapshot immediately, act on a detected event without an extra wait, and never wait past the current `cycle_deadline_at`.
 - Verify that the cycle model is consistent in all watch/loop files: a 30-minute `cycle_deadline_at` moved only by the listed trusted progress events, at most 30 cycles per loop invocation and 1 per watch invocation, `max_cycles` reported separately from `timeout` and `blocked` without posting a marker, the dispute early stop kept, and the PR #9 timeline example still reaching the 09:09:24 follow-up before its cycle deadline.
 - Parse PowerShell and POSIX installers before running them.
 - Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
 - Verify that `-WhatIf` / `--dry-run` leaves every scratch agent root byte-identical, including with migration requested, and that a newer -> older -> newer package sequence refuses the downgrade, keeps the manifest unchanged, and still updates the newer Skills afterward. Also cover an existing manifest with a missing, empty, or invalid-JSON `packageVersion`, a manifest whose `packageVersion` line is readable but whose JSON is truncated, has appended garbage, or has an inserted unknown line, cross-acceptance of manifests written by every installer (with and without migrations), a second and third `--migrate-legacy` run by every writer order followed by a normal run of every installer, an invalid package `VERSION` on a fresh root, and version grammar boundaries (4 vs 5 components, 9 vs 10 digits) with identical exit codes in both installers.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.
+- Verify that the three protocol references (`pr-review`, `pr-followup`, `pr-cleanup`) have the same SHA-256, and that `pr-cleanup` documents the same status set, item outcomes, deletion safety rules, and `coding-agent-cleanup:v1` fields in `SKILL.md`, `references/cleanup.md`, `references/examples.md`, and README.
