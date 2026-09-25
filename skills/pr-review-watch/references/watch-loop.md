@@ -8,11 +8,25 @@ No workflow runtime or helper script is used. The agent polls with existing `gh`
 
 - Default polling interval: 30 seconds.
 - Maximum monitoring window: 30 minutes from the invocation start. A user may request a shorter window, never a longer one.
-- One shell wait or polling call must remain below five minutes. Prefer one 30-second wait per call.
+- One wait or polling call must remain below five minutes. Use the host-specific waiting method below; do not assume a foreground 30-second sleep is supported.
 - New-HEAD follow-up grace: at most two minutes, in 30-second polls, within the same overall deadline.
 - `watch`: process at most one ready role-specific cycle.
 - `loop`: repeat ready role-specific cycles until a terminal result.
 - A polling slice ending does not create a new invocation and never extends the deadline.
+
+## Host-specific waiting
+
+Keep GitHub snapshots approximately 30 seconds apart, but use the execution primitive supported by the current host:
+
+- Claude Code: do not issue a bare foreground `sleep 30` or `Start-Sleep 30`. Use Monitor or a background shell command with an inline bounded `until`/`while` loop, as directed by Claude Code. The loop may use short sleeps to service the monitor, but must throttle GitHub snapshot requests to approximately 30-second intervals and must exit on change, slice deadline, cancellation, or error.
+- Codex: use an existing command session's wait/poll facility when available. Otherwise use one bounded wait of at most 30 seconds, then return control and fetch a fresh snapshot.
+- Other hosts: use their native non-blocking monitor or bounded wait. If no supported mechanism can preserve the deadline and cancellation behavior, stop as `blocked` instead of inventing an unbounded workaround.
+
+An inline loop passed directly to a host execution tool is not a generated polling-script file or a workflow runtime. Do not save it in the repository or agent directories. It may use only the already validated owner, repository, PR number, deadline, and prior numeric event IDs or complete HEAD SHA; never interpolate PR or comment text into shell source.
+
+## Compatibility preflight
+
+Before polling, confirm that the required sibling one-shot Skill exists, its frontmatter name is the expected `pr-review` or `pr-followup`, and its protocol defines the v1 marker fields used by this reference. If the sibling is missing, user-modified to an incompatible protocol, or cannot be inspected, stop as `blocked` rather than mixing versions.
 
 ## Scriptless monitoring record
 
@@ -73,7 +87,7 @@ A trusted `approved` decision for the current HEAD is terminal only when no late
 If no event is ready:
 
 1. Check whether the current time reached `deadline_at`.
-2. Wait 30 seconds or only the smaller remaining duration.
+2. Use the host-specific waiting method for 30 seconds or only the smaller remaining duration.
 3. Fetch a new snapshot; do not reuse cached `gh pr view` output.
 4. Compare the prior and current HEAD and event IDs.
 5. Record new observations, select at most the oldest ready event set for the current role, and either process it or repeat.

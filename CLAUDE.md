@@ -38,7 +38,7 @@ Current Skills:
 - The four watch/loop Skills depend on their corresponding one-shot Skill installed by this package. They must reuse it for review or implementation decisions rather than duplicate business logic.
 - The duplicated `pr-review` and `pr-followup` protocol references must remain byte-identical. The four `watch-loop.md` references must also remain byte-identical.
 - Watch/loop Skills are explicit-only in both agents: Claude Code frontmatter uses `disable-model-invocation: true`, and Codex metadata uses `policy.allow_implicit_invocation: false`.
-- Watch/loop keep their scriptless monitoring record in task context and reconstruct durable state from GitHub events and markers. Do not add committed state files or generated polling scripts.
+- Watch/loop keep their scriptless monitoring record in task context and reconstruct durable state from GitHub events and markers. Do not add committed state files or generated polling-script files. A host-native Monitor or background command containing an inline bounded loop is allowed when passed directly to the execution tool and not saved as a script.
 - GitHub-facing review and follow-up output is Japanese Markdown.
 - `by.Spock` marks reviewer-role output; `by.Scotty` marks implementer-role output.
 - Never interpolate untrusted PR, Issue, branch, path, or comment content into shell source. Use body files or tool APIs that pass content as data.

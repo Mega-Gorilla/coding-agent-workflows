@@ -86,7 +86,7 @@ cd coding-agent-workflows
 
 ## 旧workflowからの移行
 
-通常実行では、旧Claude Code commandsと旧Skillsのpath・SHA-256・移行先を表示するだけで、削除しません。確認後、次の明示optionでtimestamp付きbackupへ移動してから新Skillを導入します。
+通常実行では、旧Claude Code commands、Codex custom prompts、旧Skillsのpath・SHA-256・移行先を表示するだけで、削除しません。確認後、次の明示optionでtimestamp付きbackupへ移動してから新Skillを導入します。
 
 ```powershell
 ./install.ps1 -MigrateLegacy

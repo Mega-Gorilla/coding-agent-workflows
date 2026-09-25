@@ -13,6 +13,8 @@
 | `pr_merge.md`、`pr-merge` | `pr-merge` |
 | `startup_status.md`、`startup-status` | `startup-status` |
 
+Codexの旧custom promptsは`/prompts:pr_review`のように呼び出されます。`prompts/pr_review.md`、`prompts/pr_re_review.md`、`prompts/review_followup.md`、`prompts/pr_merge.md`、`prompts/startup_status.md`も上表と同じ新Skillへ移行します。
+
 `pr-review-watch`、`pr-followup-watch`、`pr-review-loop`、`pr-followup-loop`には旧形式がなく、package 0.3.0以降の通常更新で追加されます。4つは明示呼び出し専用で、対応する単発Skillも同時に必要です。
 
 Claude Codeの`/review`は組み込みの`code-review` aliasが優先されるため、新しいSkill名には採用しません。
@@ -23,6 +25,7 @@ Claude Codeの`/review`は組み込みの`code-review` aliasが優先される�
 
 - Claude Codeの`commands/`: `review.md`、`pr_review.md`、`pr_re_review.md`、`review_followup.md`、`pr_merge.md`、`startup_status.md`
 - Claude Codeの`skills/`: 旧`review`、`pr-review`、`pr-re-review`、`review-followup`、`pr-merge`、`startup-status`
+- Codexの`prompts/`: `pr_review.md`、`pr_re_review.md`、`review_followup.md`、`pr_merge.md`、`startup_status.md`
 - Codexの`skills/`: 同じ旧Skill一式
 
 現在のpackageと内容が一致するSkillはlegacyとして扱いません。
@@ -58,10 +61,11 @@ Claude Codeの`/review`は組み込みの`code-review` aliasが優先される�
 ```text
 coding-agent-workflows/backups/YYYYMMDD-HHMMSS/
 ├── commands/
+├── prompts/
 └── skills/
 ```
 
-元の相対pathを保持するため、必要なファイルを元の`commands/`または`skills/`へ戻せます。移行後、新しいSkillsが導入されます。
+元の相対pathを保持するため、必要なファイルを元の`commands/`、`prompts/`、または`skills/`へ戻せます。移行後、新しいSkillsが導入されます。
 
 ## Manifest
 
