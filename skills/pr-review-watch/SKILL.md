@@ -25,11 +25,11 @@ If the sibling `pr-review` Skill or either required reference is unavailable, st
 
 ## Workflow
 
-1. Resolve and pin the repository, PR number, URL, base, head branch, and complete current HEAD SHA. Initialize the scriptless monitoring record with role `review`, mode `watch`, a UTC start time, and an absolute deadline no later than 30 minutes after the start.
+1. Resolve and pin the repository, PR number, URL, base, head branch, and complete current HEAD SHA. Initialize the scriptless monitoring record with role `review`, mode `watch`, `max_cycles = 1`, a UTC invocation start, and a `cycle_deadline_at` 30 minutes after the start.
 2. Take an initial GitHub snapshot. If the current HEAD has no trusted review decision, a trusted follow-up requires re-review, or the HEAD is newer than the latest trusted review, process it immediately. If the latest trusted decision for the current HEAD is `approved` or `blocked`, return that terminal result without posting a duplicate.
-3. If nothing is ready, poll at the default 60-second interval under the common watch rules. Do not reset the deadline between polling slices.
+3. If nothing is ready, poll at the default 60-second interval under the common watch rules. Do not move `cycle_deadline_at` between polling slices; only the trusted progress events in the shared reference move it.
 4. When a new HEAD is first observed, apply the two-minute follow-up grace rule before reviewing it. Treat a matching follow-up marker and the new HEAD as one combined trigger.
 5. Run exactly one review or re-review cycle using `pr-review`. Preserve the existing `workflow_id`, `origin_event_id`, and finding IDs when continuing a workflow. Use an isolated detached reviewer worktree for any checkout or test.
-6. Post at most one review-cycle comment, then stop. A `commented` result counts as the one cycle even though it is not approval. Report the fixed target, reviewed HEAD, triggering event IDs, decision, validation performed, start/deadline, and whether a follow-up grace period was used.
+6. Post at most one review-cycle comment, then stop. A `commented` result counts as the one cycle even though it is not approval. Report the fixed target, reviewed HEAD, triggering event IDs, decision, validation performed, invocation start, final cycle deadline and last progress, and whether a follow-up grace period was used.
 
 Never continue into a second review cycle; use `pr-review-loop` for that.

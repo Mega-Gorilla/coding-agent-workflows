@@ -102,9 +102,9 @@ https://github.com/owner/repository/pull/32
 
 - 開始直後に状態を確認し、変更がない間は既定60秒間隔でpollします。
 - new HEADの検出後は、対応報告を最大2分待ってからレビューします。
-- 進展を確認するたびに、次のサイクル期限として30分を確保します。
+- 進展を確認するたびに、次のサイクル期限として30分を確保します。変化のないpollや無効なイベントでは期限を延長しません。
 - watchは最大1サイクル、loopは1回の呼び出しで最大30サイクルです。
-- 最新HEADへの承認、`blocked`、`timeout`、`max_cycles`、PRのclose／mergeで終了します。
+- 最新HEADへの承認、`blocked`、`timeout`、`max_cycles`、PRのclose／mergeで終了します。`max_cycles`では新しいmarkerを投稿しないため、次の明示呼び出しで同じworkflowを継続できます。
 
 ## `pr-cleanup`
 
