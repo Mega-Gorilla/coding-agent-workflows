@@ -256,6 +256,21 @@ inspect_legacy() {
       found=1
       record_or_migrate_legacy "$agent_root" "$path" "commands/$file_name" "$replacement"
     done
+  elif [ "$agent" = codex ]; then
+    for entry in \
+      'pr_review.md:pr-review' \
+      'pr_re_review.md:pr-review' \
+      'review_followup.md:pr-followup' \
+      'pr_merge.md:pr-merge' \
+      'startup_status.md:startup-status'
+    do
+      file_name=${entry%%:*}
+      replacement=${entry#*:}
+      path="$agent_root/prompts/$file_name"
+      [ -f "$path" ] || continue
+      found=1
+      record_or_migrate_legacy "$agent_root" "$path" "prompts/$file_name" "$replacement"
+    done
   fi
 
   if [ "$found" -eq 1 ] && [ "$migrate_legacy" -ne 1 ]; then

@@ -254,6 +254,24 @@ function Get-LegacyCandidates {
                 })
             }
         }
+    } elseif ($Agent -eq 'codex') {
+        $promptMappings = [ordered]@{
+            'pr_review.md' = 'pr-review'
+            'pr_re_review.md' = 'pr-review'
+            'review_followup.md' = 'pr-followup'
+            'pr_merge.md' = 'pr-merge'
+            'startup_status.md' = 'startup-status'
+        }
+        foreach ($fileName in $promptMappings.Keys) {
+            $path = Join-Path (Join-Path $AgentRoot 'prompts') $fileName
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                $items.Add([pscustomobject]@{
+                    Path = $path
+                    Relative = "prompts/$fileName"
+                    Mapping = $promptMappings[$fileName]
+                })
+            }
+        }
     }
     return $items
 }

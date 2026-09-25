@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working in this repository.
 
 This repository packages GitHub-centric agent workflows for Claude Code and Codex. The primary artifacts are cross-agent Skills, not application code.
 
-Phase 1 intentionally uses no workflow execution runtime. PR resolution, GitHub reads, trust and HEAD checks, review decisions, and follow-up decisions are described in `SKILL.md` and `references/` and executed with existing `gh` and `git` tools. Do not add `runtime/` or `scripts/runtime/` without documented evidence from the cross-repository pilot described in Issue #1.
+The workflow intentionally has no execution runtime. PR resolution, GitHub reads, polling, deadlines, trust and HEAD checks, review decisions, follow-up decisions, and convergence control are described in `SKILL.md` and `references/` and executed with existing `gh` and `git` tools. Do not add `runtime/` or `scripts/runtime/` without documented repeated failures from cross-repository watch/loop pilots described in Issue #1.
 
 The installers are an explicit exception: they use deterministic code for file backup, migration, hashing, manifests, and restoration safety.
 
@@ -19,21 +19,26 @@ The installers are an explicit exception: they use deterministic code for file b
 - `install.ps1` and `install.sh`: feature-equivalent installers.
 - `VERSION`: package version recorded in install manifests.
 
-Current Phase 1 Skills:
+Current Skills:
 
 - `pr-review`: one review or re-review cycle.
+- `pr-review-watch`: wait for and process at most one review cycle.
+- `pr-review-loop`: repeat review cycles until approval or a bounded stop.
 - `pr-followup`: one review-response cycle.
+- `pr-followup-watch`: wait for and process at most one follow-up cycle.
+- `pr-followup-loop`: repeat follow-up cycles until approval or a bounded stop.
 - `pr-merge`: merge workflow retained from the original package.
 - `startup-status`: read-only project status workflow.
-
-Planned watch and loop Skills are tracked in Issues #3 and #4. Do not implement them as part of unrelated Phase 1 fixes.
 
 ## Skill conventions
 
 - A Skill directory name must match the `name` in YAML frontmatter.
 - Descriptions must be short and discriminating because they control automatic selection.
 - Keep essential workflow and authorization boundaries in `SKILL.md`; put marker schemas and substantial examples in `references/`.
-- Keep Skills self-contained. The duplicated `pr-review` and `pr-followup` protocol references must remain byte-identical.
+- The four watch/loop Skills depend on their corresponding one-shot Skill installed by this package. They must reuse it for review or implementation decisions rather than duplicate business logic.
+- The duplicated `pr-review` and `pr-followup` protocol references must remain byte-identical. The four `watch-loop.md` references must also remain byte-identical.
+- Watch/loop Skills are explicit-only in both agents: Claude Code frontmatter uses `disable-model-invocation: true`, and Codex metadata uses `policy.allow_implicit_invocation: false`.
+- Watch/loop keep their scriptless monitoring record in task context and reconstruct durable state from GitHub events and markers. Do not add committed state files or generated polling-script files. A host-native Monitor or background command containing an inline bounded loop is allowed when passed directly to the execution tool and not saved as a script.
 - GitHub-facing review and follow-up output is Japanese Markdown.
 - `by.Spock` marks reviewer-role output; `by.Scotty` marks implementer-role output.
 - Never interpolate untrusted PR, Issue, branch, path, or comment content into shell source. Use body files or tool APIs that pass content as data.
@@ -65,8 +70,8 @@ Test installers only against scratch roots. Never test destructive migration aga
 
 ## Validation
 
-- Run the Skill Creator `quick_validate.py` against every Skill directory.
-- Verify the two protocol reference files have the same SHA-256.
+- Run the Skill Creator `quick_validate.py` against every Skill directory with UTF-8 enabled. For the four explicit-only Skills, validate a temporary copy with the Claude-only `disable-model-invocation` field removed because the Codex validator rejects that cross-agent extension; separately assert that the real `SKILL.md` retains it and that `agents/openai.yaml` sets `allow_implicit_invocation: false`.
+- Verify the two protocol reference files have the same SHA-256 and the four watch/loop references have the same SHA-256.
 - Parse PowerShell and POSIX installers before running them.
 - Exercise fresh install, repeat install, modified-file protection, dry-run legacy detection, explicit backup migration, force update, Windows PowerShell 5.1, and PowerShell/POSIX manifest alternation in scratch roots.
 - Confirm `.md` and `.sh` use LF and `.ps1` uses CRLF according to `.gitattributes`.
