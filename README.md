@@ -25,6 +25,7 @@ Claude Codeの`/review`は組み込みaliasと衝突するため使用しませ�
 | `pr-followup` | レビュー指摘を一度評価し、許可された修正・検証・対応報告を行う |
 | `pr-followup-watch` | 次のレビュー指摘を待ち、最大1回対応して終了する |
 | `pr-followup-loop` | 最新HEADの承認または停止条件まで対応と待機を反復する |
+| `pr-cleanup` | PRが新たに導入した技術負債を棚卸しし、動作を変えない範囲で整理して報告する |
 | `pr-merge` | マージ前確認、マージ、Issue更新を行う |
 | `startup-status` | Issue、PR、CI、Git履歴から進捗を確認する |
 
@@ -32,9 +33,11 @@ watchは未処理イベントがあれば即時処理し、なければ既定60�
 
 watch/loopは明示呼び出し専用です。Claude Codeでは`disable-model-invocation: true`、Codexでは`agents/openai.yaml`の`policy.allow_implicit_invocation: false`を設定しています。
 
+`pr-cleanup`は、実装またはレビュー対応が一段落した後、最終レビューの前に明示的に実行します。目的はリポジトリ全体の負債解消ではなく、「そのPRで新しく導入された負債」を整理するか、残す理由を明示することです。cleanup後の新しいHEADは`pr-review`でレビューします。各follow-upサイクルへの自動組み込みやmerge前の必須化は、実運用評価（#8）の後に判断します。
+
 ## PRの指定
 
-6つのPR workflow Skillは同じ規則で次を受け付けます。
+7つのPR workflow Skill（`pr-review*`、`pr-followup*`、`pr-cleanup`）は同じ規則で次を受け付けます。
 
 ```text
 32
@@ -123,6 +126,7 @@ cd coding-agent-workflows
 ## 権限境界
 
 - ユーザーの最新メッセージ自体が`/pr-review 32`または`$pr-review 32`形式の呼び出しであれば、そのPRへのレビューコメント投稿を許可します。コード変更やpushは許可しません。
+- ユーザーの最新メッセージ自体が`/pr-cleanup 32`または`$pr-cleanup 32`形式の呼び出しであれば、そのPRに限定した動作を変えないcleanup・refactor、安全性を確認できた不要ファイルの削除、検証、通常のcommit/push、cleanup報告を許可します。PRと無関係な既存負債の修正、公開API・永続データ形式・外部contractの変更、大規模なarchitecture変更、所有者が不明なuntracked fileの削除、dependencyの追加は許可しません。
 - ユーザーの最新メッセージ自体が`/pr-followup 32`または`$pr-followup 32`形式の呼び出しであれば、そのPRに限定した修正、検証、通常のcommit/push、対応報告を許可します。
 - watch/loopは対応するSkill名を明示して呼び出した場合だけ動作します。review側は投稿だけ、follow-up側は対象PRに限定した修正・検証・通常のcommit/push・対応報告を、最大30分の実行中に反復できます。
 - 通常文で自動選択された場合は、ユーザーが明示した操作だけを行います。曖昧な場合は下書きまたは評価までで停止します。
@@ -146,6 +150,8 @@ cd coding-agent-workflows
 - markerは認証ではなく、branch protectionやrequired reviewを置き換えません。
 - 投稿者権限、編集状態、対象HEADを確認できないmarkerは終端判定に使いません。
 
+`pr-cleanup`は別種の`coding-agent-cleanup:v1` markerに、cleanup前後の完全HEAD SHA、status（`cleaned`、`partially_cleaned`、`needs_decision`、`blocked`）、cleanup項目IDごとの結果を記録します。`workflow_id`を持たず、review／follow-upのworkflowを継続・完了させることも、承認として扱われることもありません。cleanup不要（`clean`）の場合は、commitもコメント投稿も行いません。
+
 仕様と例は各Skillの`references/`に同梱されています。
 
 ## リポジトリ構成
@@ -159,6 +165,7 @@ cd coding-agent-workflows
 │   ├── pr-followup/
 │   ├── pr-followup-watch/
 │   ├── pr-followup-loop/
+│   ├── pr-cleanup/
 │   ├── pr-merge/
 │   └── startup-status/
 ├── legacy/claude-commands/  # 履歴参照用。通常配布対象外
